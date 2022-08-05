@@ -9,9 +9,8 @@ import messages
 import re
 import sqlite3 as sl
 from test_post_object import TestObject
-from functions import generate_buttons_list
+from functions import generate_buttons_list, get_post_details
 from objects import NewPost
-import bot_functions.bot_add_post_procedure
 
 
 bot = telebot.TeleBot(config.bot_token)
@@ -66,7 +65,7 @@ def archive_command(message):
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^post_add_.*', call.data))
-def select_client_query(call):
+def post_add_1(call):
     """Starts the procedure of adding new post to tracking.
     Saves client_id to the NewPost object.
     Step 1: Ask to input post name.
@@ -80,38 +79,146 @@ def select_client_query(call):
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_active_client_.*', call.data))
-def select_client_query(call):
+def select_active_client(call):
     """Sends the short information about client and a list of its posts."""
     bot.answer_callback_query(call.id)
     client_name = call.data.split('_')[-1]
     list_of_buttons = generate_buttons_list('select_active_post', client_name)
+    archive_client_button = types.InlineKeyboardButton(text=messages.archive_client,
+                                                       callback_data=f'archive_client_1_{client_name}')
+    list_of_buttons.add(archive_client_button)
     bot.send_message(call.from_user.id, messages.post_list_message, reply_markup=list_of_buttons)
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_active_post_.*', call.data))
-def select_client_query(call):
+def select_active_post(call):
     """Sends the short information about a post and a few options:
     - see all comments;
     - go to the original post;
     - disable tracking.
     """
     bot.answer_callback_query(call.id)
-    # TODO: add the connection to db to take the information about the post and send it to the user.
-    # TODO: add some user options (listed in docstring).
+    post_id = call.data.split('_')[-1]
+    post_info = get_post_details(post_id)
+    # TODO: generate real post_info_message object.
+    post_info_message = ''    # Temporary 'cap' object
+    list_of_buttons = types.InlineKeyboardMarkup()
+    watch_comments_button = types.InlineKeyboardButton(text=messages.watch_comments,
+                                                       callback_data=f'give_comments_list_{post_id}')
+    go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
+                                                   url=post_info['post_link'])
+    archive_post_button = types.InlineKeyboardButton(text=messages.archive_post,
+                                                     callback_data=f'archive_post_{post_id}')
+    list_of_buttons.add(watch_comments_button, go_to_post_button, archive_post_button)
+    bot.send_message(call.from_user.id, post_info_message, reply_markup=list_of_buttons)
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^give_comments_list_.*', call.data))
+def give_comments_list(call):
+    """Sends the list of comments under the selected post."""
+    bot.answer_callback_query(call.id)
+    post_id = call.data.split('_')[-1]
+    post_info = get_post_details(post_id)
+    # TODO: generate real post_info_message object.
+    comments_info_message = ''  # Temporary 'cap' object
+    list_of_buttons = types.InlineKeyboardMarkup()
+    go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
+                                                   url=post_info['post_link'])
+    list_of_buttons.add(go_to_post_button)
+    bot.send_message(call.from_user.id, comments_info_message, reply_markup=list_of_buttons)
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'add_new_client')
-def add_client_query(call):
-    """Adds new client to the base. In the end propose to add a new post for tracking for this client."""
+def add_new_client(call):
+    """Starts the procedure of adding new client to the base.
+    Step 1: ask for client name.
+    """
     bot.answer_callback_query(call.id)
-    pass
+    msg = bot.send_message(call.from_user.id, messages.ask_client_name)
+    bot.register_next_step_handler(msg, process_new_client)
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_archive_client_.*', call.data))
-def select_client_query(call):
+def select_archive_client(call):
     """Sends the short information about client and a list of its posts with short stats."""
     bot.answer_callback_query(call.id)
-    pass
+    client_name = call.data.split('_')[-1]
+    list_of_buttons = generate_buttons_list('select_archive_post', client_name)
+    bot.send_message(call.from_user.id, messages.client_posts_archive_message, reply_markup=list_of_buttons)
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_archive_post_.*', call.data))
+def select_archive_post(call):
+    """Sends short information about selected post and propose to return it to tracking or delete."""
+    post_id = call.data.split('_')[-1]
+    post_info = get_post_details(post_id)
+    # TODO: generate real post_info_message object.
+    post_info_message = ''  # Temporary 'cap' object
+    list_of_buttons = types.InlineKeyboardMarkup()
+    track_again_button = types.InlineKeyboardButton(text=messages.track_again,
+                                                    callback_data=f'track_again_{post_id}')
+    delete_button = types.InlineKeyboardButton(text=messages.delete_post,
+                                               callback_data=f'delete_post_1_{post_id}')
+    list_of_buttons.add(track_again_button, delete_button)
+    bot.send_message(call.from_user.id, post_info_message, reply_markup=list_of_buttons)
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^track_again_.*', call.data))
+def track_again(call):
+    """Returns archived post to tracking."""
+    post_id = call.data.split('_')[-1]
+    # TODO: add query to db to return post (remove flag is_archive).
+    bot.send_message(call.from_user.id, messages.success_add_post)
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^delete_post_1_.*', call.data))
+def delete_post_1(call):
+    """Deletes post from statistics. Asks for password for this action."""
+    bot.answer_callback_query(call.id)
+    post_id = call.data.split('_')[-1]
+    msg = bot.send_message(call.from_user.id, messages.ask_password)
+    bot.register_next_step_handler(msg, delete_post(post_id))
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^archive_client_1_.*', call.data))
+def archive_client_1(call):
+    """Starts the move-to-archive procedure.
+    Step 1: verification.
+    """
+    bot.answer_callback_query(call.id)
+    client_name = call.data.split('_')[-1]
+    list_of_buttons = types.InlineKeyboardMarkup()
+    archive_button = types.InlineKeyboardButton(text=messages.archive_client,
+                                                callback_data=f'archive_client_2_{client_name}')
+    list_of_buttons.add(archive_button)
+    bot.send_message(call.from_user.id, messages.archive_client_verification, reply_markup=list_of_buttons)
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^archive_client_2_.*', call.data))
+def archive_client_2(call):
+    """Finishes the move-to-archive procedure.
+    Step 2: moves client and all its posts to archive.
+    """
+    bot.answer_callback_query(call.id)
+    client_name = call.data.split('_')[-1]
+    # TODO: add query to update client info (add is_archive flag)
+    # TODO: add trigger and query to archive all posts of this client (add is_archive flag)
+    bot.send_message(call.from_user.id, messages.success_archive_client)
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^archive_post_.*', call.data))
+def archive_post(call):
+    """Starts the move-to-archive procedure."""
+    bot.answer_callback_query(call.id)
+    # TODO: add query to update post info (add is_archive flag) - the same as on previous step
+    bot.send_message(call.from_user.id, messages.success_archive_post)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'exit')
+def exit_function(call):
+    """Finishes the procedure of adding new client."""
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.from_user.id, messages.nothing_message)
 
 
 # <-- Message handlers section -->
@@ -141,11 +248,60 @@ def finish_post_add(message, new_post):
         new_post.add_channel_name(message.text.split('/')[-2])
         new_post.add_channel_post_id(message.text.split('/')[-1])
         # TODO: add the connection to db to add the new post.
+        # TODO: This query should collect the info about this post at the first time and return its id in base.
+        post_id = '0'  # Temporary 'cap' object
+        list_of_buttons = types.InlineKeyboardMarkup()
+        go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
+                                                       callback_data=f'select_active_post_{post_id}')
+        list_of_buttons.add(go_to_post_button)
         new_post.default_condition()
-        bot.send_message(message.chat.id, messages.success_add_post)
+        bot.send_message(message.chat.id, messages.success_add_post, reply_markup=list_of_buttons)
     else:
         msg = bot.send_message(message.chat.id, messages.ask_post_link_second_time)
         bot.register_next_step_handler(msg, finish_post_add(new_post))
+
+
+@bot.message_handler(content_types=['text'])
+def process_new_client(message):
+    """Finishes the procedure of adding new client.
+    Step 2: Check user's input and add client to the base.
+    """
+    client_name = message.text
+    # TODO: add the connection to db to take all clients' names. ->
+    # TODO: Should compare names and return new clent_id OR client_id and flag if client already exists.
+    clients = []  # Temporary 'cap' object
+    if client_name not in clients:
+        # TODO: add the connection to db to add new client.
+        client_id = '0'  # Temporary 'cap' object
+        list_of_buttons = types.InlineKeyboardMarkup()
+        add_post_button = types.InlineKeyboardButton(text=messages.add_post,
+                                                     callback_data=f'post_add_{client_id}')
+        nothing_button = types.InlineKeyboardButton(text=messages.nothing,
+                                                    callback_data='exit')
+        list_of_buttons.add(add_post_button, nothing_button)
+        bot.send_message(message.chat.id, messages.success_add_client, reply_markup=list_of_buttons)
+    else:
+        client_id = '0'  # Temporary 'cap' object
+        list_of_buttons = types.InlineKeyboardMarkup()
+        add_post_button = types.InlineKeyboardButton(text=messages.add_post,
+                                                     callback_data=f'post_add_{client_id}')
+        add_another_client_button = types.InlineKeyboardButton(text=messages.add_client_button,
+                                                               callback_data='add_new_client')
+        nothing_button = types.InlineKeyboardButton(text=messages.nothing,
+                                                    callback_data='exit')
+        list_of_buttons.add(add_post_button, add_another_client_button, nothing_button)
+        bot.send_message(message.chat.id, messages.client_already_exists, reply_markup=list_of_buttons)
+
+
+@bot.message_handler(content_types=['text'])
+def delete_post(message, post_id):
+    """Deletes post from the base."""
+    if message.text == config.password:
+        # TODO: add query to db to delete post from the base.
+        bot.send_message(message.chat.id, messages.deleted_successfully)
+    else:
+        msg = bot.send_message(message.chat.id, messages.wrong_password)
+        bot.register_next_step_handler(msg, delete_post(post_id))
 
 
 bot.polling()

@@ -2,3 +2,5 @@ config.py
 .idea
 venv
 test_post_object.py
+*.db
+base_init.py
