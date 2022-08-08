@@ -87,7 +87,7 @@ client_button = 'Добавить клиента'
 archive_button = 'Архив'
 
 # Add new client button
-add_client_button = 'Завести нового клиента'
+add_client_button = 'Добавить клиента'
 
 # Watch comments button
 watch_comments = 'Посмотреть комментарии'
