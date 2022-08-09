@@ -25,6 +25,12 @@ post_list_message = 'Ниже вы найдете список постов. ' \
 client_archive_message = 'Ниже вы найдете список клиентов, у которых есть посты в архиве. ' \
                          'Чтобы посмотреть посты, выберите клиента.'
 
+# Support message in archive menu when there are no archive clients
+empty_archive = 'Архив пока что пуст.'
+
+# Support message when client don't have tracking posts yet
+empty_post_list = 'У этого клиента пока нет отслеживаемых постов. Хотите добавить первый?'
+
 # Support message in archive menu after client selection
 client_posts_archive_message = 'Ниже вы найдете список постов в архиве. ' \
                                 'Чтобы посмотреть подробнее, выберите пост.'
@@ -59,6 +65,9 @@ ask_password = 'Для удаления поста введите пароль:'
 # Successfully added post to db
 success_add_post = 'Пост успешно добавлен к отслеживанию.'
 
+# Post already exists in base
+post_already_exists = 'Такой пост уже есть в базе? Хотите добавить другой пост?'
+
 # Successfully archived post
 success_archive_post = 'Пост больше не отслеживается.'
 
@@ -88,6 +97,9 @@ archive_button = 'Архив'
 
 # Add new client button
 add_client_button = 'Добавить клиента'
+
+# Add another post button
+add_another_post = 'Добавить другой пост'
 
 # Watch comments button
 watch_comments = 'Посмотреть комментарии'

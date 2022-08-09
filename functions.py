@@ -9,16 +9,19 @@ def generate_buttons_list(callback_case: str, client_id=None):
     Returns the list of buttons objects.
     :param: callback_case: the info which callback should be called by buttons;
     :param: client: the id of client, whose posts needed;
-    :return: list_of_buttons: the list of buttons.
+    :return: list_of_buttons: the list of buttons or None (if list is empty).
     """
     result = queries.list_of_elements(callback_case, client_id)
     list_of_buttons = types.InlineKeyboardMarkup()
 
-    for res in result:  # Generate the list of buttons for each result
-        button = types.InlineKeyboardButton(text=res[1],
-                                            callback_data=f'{callback_case}_{res[0]}')
-        list_of_buttons.add(button)
-    return list_of_buttons
+    if result is not None:
+        for res in result:  # Generate the list of buttons for each result
+            button = types.InlineKeyboardButton(text=res[1],
+                                                callback_data=f'{callback_case}_{res[0]}')
+            list_of_buttons.add(button)
+        return list_of_buttons
+    else:
+        return result
 
 
 def get_post_details(post_id):

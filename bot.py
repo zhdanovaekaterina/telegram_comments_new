@@ -9,7 +9,8 @@ import functions
 import queries
 import messages
 import re
-from objects import NewPost
+import csv
+import os
 
 
 bot = telebot.TeleBot(config.bot_token)
@@ -19,13 +20,13 @@ bot.delete_webhook()
 # <-- Command handlers section -->
 
 
-@bot.message_handler(commands=['start'])  # Ready
+@bot.message_handler(commands=['start'])
 def start_command(message):
     """Sends greeting message and the list of commands available."""
     bot.send_message(message.chat.id, messages.start_message)
 
 
-@bot.message_handler(commands=['add'])  # Partly ready (look to-do)
+@bot.message_handler(commands=['add'])
 def add_command(message):
     """Adds a new post to tracking."""
     list_of_buttons = functions.generate_buttons_list('post_add')
@@ -36,7 +37,7 @@ def add_command(message):
     # TODO: add the processing of user input text
 
 
-@bot.message_handler(commands=['clients'])  # Partly ready (look to-do)
+@bot.message_handler(commands=['clients'])
 def clients_command(message):
     """Sends the list of added clients. Gives a chance to select client."""
     list_of_buttons = functions.generate_buttons_list('select_active_client')
@@ -47,17 +48,20 @@ def clients_command(message):
     # TODO: add the processing of user input text
 
 
-@bot.message_handler(commands=['help'])  # Ready
+@bot.message_handler(commands=['help'])
 def help_command(message):
     """Sends the list of available commands and their descriptions."""
     bot.send_message(message.chat.id, messages.help_message)
 
 
-@bot.message_handler(commands=['archive'])  # Ready
+@bot.message_handler(commands=['archive'])
 def archive_command(message):
     """Sends the list clients who have at least 1 archived post."""
     list_of_buttons = functions.generate_buttons_list('select_archive_client')
-    bot.send_message(message.chat.id, messages.client_archive_message, reply_markup=list_of_buttons)
+    if list_of_buttons is not None:
+        bot.send_message(message.chat.id, messages.client_archive_message, reply_markup=list_of_buttons)
+    else:
+        bot.send_message(message.chat.id, messages.empty_archive)
 
 
 # <-- Callback handlers section -->
@@ -71,10 +75,25 @@ def post_add_1(call):
     """
     bot.answer_callback_query(call.id)
     client_id = call.data.split('_')[-1]
-    new_post = NewPost()
-    new_post.add_client_id(client_id)
+
+    # Save client_id to the file
+    with open(config.post_info_temp_name, 'w') as csvfile:
+        csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
+        csv_writer.writerow(client_id)
+
     msg = bot.send_message(call.from_user.id, messages.ask_post_name)
-    bot.register_next_step_handler(msg, process_post_link_input(new_post))
+    bot.register_next_step_handler(msg, process_post_link_input)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == 'add_post')
+def add_another_post_command(call):
+    """Adds a new post to tracking."""
+    list_of_buttons = functions.generate_buttons_list('post_add')
+    add_button = types.InlineKeyboardButton(text=messages.add_client_button,
+                                            callback_data='add_new_client')
+    list_of_buttons.add(add_button)  # Adds a button to add new client
+    bot.send_message(call.from_user.id, messages.add_message, reply_markup=list_of_buttons)
+    # TODO: add the processing of user input text
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_active_client_.*', call.data))
@@ -83,10 +102,19 @@ def select_active_client(call):
     bot.answer_callback_query(call.id)
     client_id = call.data.split('_')[-1]
     list_of_buttons = functions.generate_buttons_list('select_active_post', client_id)
-    archive_client_button = types.InlineKeyboardButton(text=messages.archive_client,
-                                                       callback_data=f'archive_client_1_{client_id}')
-    list_of_buttons.add(archive_client_button)
-    bot.send_message(call.from_user.id, messages.post_list_message, reply_markup=list_of_buttons)
+    if list_of_buttons is not None:
+        archive_client_button = types.InlineKeyboardButton(text=messages.archive_client,
+                                                           callback_data=f'archive_client_1_{client_id}')
+        list_of_buttons.add(archive_client_button)
+        bot.send_message(call.from_user.id, messages.post_list_message, reply_markup=list_of_buttons)
+    else:
+        list_of_buttons = types.InlineKeyboardMarkup()
+        yes_button = types.InlineKeyboardButton(text=messages.add_button,
+                                                callback_data=f'post_add_{client_id}')
+        no_button = types.InlineKeyboardButton(text=messages.nothing,
+                                               callback_data='exit')
+        list_of_buttons.add(yes_button, no_button)
+        bot.send_message(call.from_user.id, messages.empty_post_list, reply_markup=list_of_buttons)
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_active_post_.*', call.data))
@@ -147,24 +175,25 @@ def select_archive_client(call):
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_archive_post_.*', call.data))
 def select_archive_post(call):
     """Sends short information about selected post and propose to return it to tracking or delete."""
+    bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
     post_info = functions.get_post_details(post_id)
-    # TODO: generate real post_info_message object.
-    post_info_message = ''  # Temporary 'cap' object
     list_of_buttons = types.InlineKeyboardMarkup()
     track_again_button = types.InlineKeyboardButton(text=messages.track_again,
                                                     callback_data=f'track_again_{post_id}')
     delete_button = types.InlineKeyboardButton(text=messages.delete_post,
                                                callback_data=f'delete_post_1_{post_id}')
     list_of_buttons.add(track_again_button, delete_button)
-    bot.send_message(call.from_user.id, post_info_message, reply_markup=list_of_buttons)
+    bot.send_message(call.from_user.id, post_info[0], reply_markup=list_of_buttons)
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^track_again_.*', call.data))
 def track_again(call):
     """Returns archived post to tracking."""
+    bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
-    # TODO: add query to db to return post (remove flag is_archive).
+    to_archive = False
+    queries.track_status(post_id, to_archive)
     bot.send_message(call.from_user.id, messages.success_add_post)
 
 
@@ -174,7 +203,13 @@ def delete_post_1(call):
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
     msg = bot.send_message(call.from_user.id, messages.ask_password)
-    bot.register_next_step_handler(msg, delete_post(post_id))
+
+    # Save post_id to the temporary file
+    with open(config.post_id_temp_name, 'w') as csvfile:
+        csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
+        csv_writer.writerow(post_id)
+
+    bot.register_next_step_handler(msg, delete_post)
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^archive_client_1_.*', call.data))
@@ -183,10 +218,10 @@ def archive_client_1(call):
     Step 1: verification.
     """
     bot.answer_callback_query(call.id)
-    client_name = call.data.split('_')[-1]
+    client_id = call.data.split('_')[-1]
     list_of_buttons = types.InlineKeyboardMarkup()
     archive_button = types.InlineKeyboardButton(text=messages.archive_client,
-                                                callback_data=f'archive_client_2_{client_name}')
+                                                callback_data=f'archive_client_2_{client_id}')
     list_of_buttons.add(archive_button)
     bot.send_message(call.from_user.id, messages.archive_client_verification, reply_markup=list_of_buttons)
 
@@ -197,9 +232,8 @@ def archive_client_2(call):
     Step 2: moves client and all its posts to archive.
     """
     bot.answer_callback_query(call.id)
-    client_name = call.data.split('_')[-1]
-    # TODO: add query to update client info (add is_archive flag)
-    # TODO: add trigger and query to archive all posts of this client (add is_archive flag)
+    client_id = call.data.split('_')[-1]
+    queries.archive_client(client_id)
     bot.send_message(call.from_user.id, messages.success_archive_client)
 
 
@@ -207,7 +241,9 @@ def archive_client_2(call):
 def archive_post(call):
     """Starts the move-to-archive procedure."""
     bot.answer_callback_query(call.id)
-    # TODO: add query to update post info (add is_archive flag) - the same as on previous step
+    post_id = call.data.split('_')[-1]
+    to_archive = True
+    queries.track_status(post_id, to_archive)
     bot.send_message(call.from_user.id, messages.success_archive_post)
 
 
@@ -222,19 +258,24 @@ def exit_function(call):
 
 
 @bot.message_handler(content_types=['text'])
-def process_post_link_input(message, new_post):
+def process_post_link_input(message):
     """Continues the procedure of adding new post to tracking.
-    Saves post name to the NewPost object.
+    Saves post name to temporary csv file.
     Step 2: Ask to input post link.
     """
     post_name = message.text
-    new_post.add_post_name(post_name)
+
+    # Save post_name to the file
+    with open(config.post_info_temp_name, 'a') as csvfile:
+        csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
+        csv_writer.writerow([message.text])
+
     msg = bot.send_message(message.chat.id, messages.ask_post_link)
-    bot.register_next_step_handler(msg, finish_post_add(new_post))
+    bot.register_next_step_handler(msg, finish_post_add)
 
 
 @bot.message_handler(content_types=['text'])
-def finish_post_add(message, new_post):
+def finish_post_add(message):
     """Finishes the procedure of adding new post to tracking.
     Checks if message is a correct Telegram link.
     Parse user's link and save channel_name and channel_post_id to the NewPost object.
@@ -242,20 +283,35 @@ def finish_post_add(message, new_post):
     Step 3: Finish the procedure.
     """
     if re.fullmatch(r'^https://t\.me/.+/.+$', message.text):
-        new_post.add_channel_name(message.text.split('/')[-2])
-        new_post.add_channel_post_id(message.text.split('/')[-1])
-        # TODO: add the connection to db to add the new post.
-        # TODO: This query should collect the info about this post at the first time and return its id in base.
-        post_id = '0'  # Temporary 'cap' object
-        list_of_buttons = types.InlineKeyboardMarkup()
-        go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
-                                                       callback_data=f'select_active_post_{post_id}')
-        list_of_buttons.add(go_to_post_button)
-        new_post.default_condition()
-        bot.send_message(message.chat.id, messages.success_add_post, reply_markup=list_of_buttons)
+        channel_name = message.text.split('/')[-2]
+        channel_post_id = message.text.split('/')[-1]
+
+        # Save channel_name and channel_post_id to the file
+        with open(config.post_info_temp_name, 'a') as csvfile:
+            csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
+            csv_writer.writerow([channel_name, channel_post_id])
+
+        is_in_base = queries.check_post(config.post_info_temp_name)
+        if not is_in_base[0]:
+            post_added = queries.add_post(config.post_info_temp_name)
+            post_id = post_added[1]
+            list_of_buttons = types.InlineKeyboardMarkup()
+            go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
+                                                           callback_data=f'select_active_post_{post_id}')
+            list_of_buttons.add(go_to_post_button)
+            # os.remove(config.post_info_temp_name)
+            bot.send_message(message.chat.id, messages.success_add_post, reply_markup=list_of_buttons)
+        else:
+            list_of_buttons = types.InlineKeyboardMarkup()
+            yes_button = types.InlineKeyboardButton(text=messages.add_another_post,
+                                                    callback_data='add_post')
+            no_button = types.InlineKeyboardButton(text=messages.nothing,
+                                                   callback_data='exit')
+            list_of_buttons.add(yes_button, no_button)
+            bot.send_message(message.chat.id, messages.post_already_exists, reply_markup=list_of_buttons)
     else:
         msg = bot.send_message(message.chat.id, messages.ask_post_link_second_time)
-        bot.register_next_step_handler(msg, finish_post_add(new_post))
+        bot.register_next_step_handler(msg, finish_post_add)
 
 
 @bot.message_handler(content_types=['text'])
@@ -294,14 +350,17 @@ def process_new_client(message):
 
 
 @bot.message_handler(content_types=['text'])
-def delete_post(message, post_id):
+def delete_post(message):
     """Deletes post from the base."""
     if message.text == config.password:
-        # TODO: add query to db to delete post from the base.
+        with open(config.post_id_temp_name, 'r') as csvfile:
+            csv_reader = csv.reader(csvfile, delimiter=',')
+            post_id = [row[0] for row in csv_reader]
+        queries.delete_post(*post_id)
         bot.send_message(message.chat.id, messages.deleted_successfully)
     else:
         msg = bot.send_message(message.chat.id, messages.wrong_password)
-        bot.register_next_step_handler(msg, delete_post(post_id))
+        bot.register_next_step_handler(msg, delete_post)
 
 
 bot.polling()
