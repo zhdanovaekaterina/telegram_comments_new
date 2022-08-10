@@ -5,3 +5,6 @@ test_post_object.py
 *.db
 base_init.py
 *.csv
+*.session
+*.json
+debbuging.py

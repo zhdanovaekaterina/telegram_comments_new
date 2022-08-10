@@ -4,13 +4,17 @@
 help_message = '/help - помощь\n' \
                '/add - добавить пост\n' \
                '/clients - добавить клиента\n' \
-               '/archive - архив'
+               '/archive - архив\n' \
+               'STOP - сбросить текущую команду'
 
 # First message after bot start
 start_message = f'С чего начнем?\n{help_message}'
 
 # Ask the user which client should we add the post?
 add_message = 'К какому клиенту добавляем новый пост?'
+
+# Ask the user which client should we add the post?
+stop_message = 'Ввод отменен.'
 
 # Support message in client's menu
 client_list_message = 'Ниже вы найдете список клиентов. ' \
@@ -72,7 +76,7 @@ ask_password = 'Для удаления поста введите пароль:'
 success_add_post = 'Пост успешно добавлен к отслеживанию.'
 
 # Post already exists in base
-post_already_exists = 'Такой пост уже есть в базе? Хотите добавить другой пост?'
+post_already_exists = 'Такой пост уже есть в базе! Хотите добавить другой пост?'
 
 # Successfully archived post
 success_archive_post = 'Пост больше не отслеживается.'
@@ -85,6 +89,9 @@ success_add_client = 'Клиент успешно добавлен. Хотите
 
 # Client already exists
 client_already_exists = 'В базе уже есть такой клиент! Хотите добавить для него пост или добавить нового клиента?'
+
+# Post don't have comments yet
+no_comments_yet = 'У этого поста еще нет комментариев. Попробуйте проверить позже.'
 
 # Post deleted successfully
 deleted_successfully = 'Пост успешно удален из базы.'

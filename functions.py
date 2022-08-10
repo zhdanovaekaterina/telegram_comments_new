@@ -52,6 +52,7 @@ def init_base():
                       (comment_id INTEGER PRIMARY KEY AUTOINCREMENT,
                        post_id INTEGER,
                        comment_date INTEGER,
+                       author_username TEXT,
                        author TEXT,
                        comment_text TEXT,
                        is_new INTEGER,
@@ -212,9 +213,15 @@ def comment_info(post_id: int):
     elements_1 = ['channel_name', 'channel_post_id', 'posts', 'post_id']
     post_info = query_constructor(query_case_1, elements_1, parametrs)
 
+    if len(post_info) == 0:
+        return None
+
     query_case_2 = 'select_6'
     elements_2 = ['comment_date', 'author', 'comment_text', 'is_new', 'comments', 'post_id']
     comments_info = query_constructor(query_case_2, elements_2, parametrs)
+
+    if len(comments_info) == 0:
+        return None
 
     # Convert post info to dictionary
     post_result_keys = ['channel_name', 'channel_post_id']

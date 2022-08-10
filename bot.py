@@ -107,6 +107,7 @@ def post_add_1(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'add_post')
 def add_another_post_command(call):
     """Adds a new post to tracking."""
+    bot.answer_callback_query(call.id)
     list_of_buttons = f.generate_buttons_list('post_add')
     add_button = types.InlineKeyboardButton(text=messages.add_client_button,
                                             callback_data='add_new_client')
@@ -165,11 +166,14 @@ def give_comments_list(call):
     post_id = call.data.split('_')[-1]
     comments_info = f.comment_info(post_id)
     # TODO: add a query to delete is_new flags if comments are seen
-    list_of_buttons = types.InlineKeyboardMarkup()
-    go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
-                                                   url=comments_info[1])
-    list_of_buttons.add(go_to_post_button)
-    bot.send_message(call.from_user.id, comments_info[0], reply_markup=list_of_buttons)
+    if comments_info is not None:
+        list_of_buttons = types.InlineKeyboardMarkup()
+        go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
+                                                       url=comments_info[1])
+        list_of_buttons.add(go_to_post_button)
+        bot.send_message(call.from_user.id, comments_info[0], reply_markup=list_of_buttons)
+    else:
+        bot.send_message(call.from_user.id, messages.no_comments_yet)
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'add_new_client')
@@ -282,7 +286,9 @@ def process_post_link_input(message):
     Saves post name to temporary csv file.
     Step 2: Ask to input post link.
     """
-    post_name = message.text
+    if message.text == 'STOP':
+        bot.send_message(message.chat.id, messages.stop_message)
+        return
 
     # Save post_name to the file
     with open(config.post_info_temp_name, 'a') as csvfile:
@@ -301,6 +307,10 @@ def finish_post_add(message):
     Add attributes of NewPost object to db.
     Step 3: Finish the procedure.
     """
+    if message.text == 'STOP':
+        bot.send_message(message.chat.id, messages.stop_message)
+        return
+
     if re.fullmatch(r'^https://t\.me/.+/.+$', message.text):
         channel_name = message.text.split('/')[-2]
         channel_post_id = message.text.split('/')[-1]
@@ -338,6 +348,10 @@ def process_new_client(message):
     """Finishes the procedure of adding new client.
     Step 2: Check user's input and add client to the base.
     """
+    if message.text == 'STOP':
+        bot.send_message(message.chat.id, messages.stop_message)
+        return
+
     client_name = message.text
 
     # Check if client is already in base
@@ -371,6 +385,10 @@ def process_new_client(message):
 @bot.message_handler(content_types=['text'])
 def delete_post(message):
     """Deletes post from the base."""
+    if message.text == 'STOP':
+        bot.send_message(message.chat.id, messages.stop_message)
+        return
+
     if message.text == config.password:
         with open(config.post_id_temp_name, 'r') as csvfile:
             csv_reader = csv.reader(csvfile, delimiter=',')
