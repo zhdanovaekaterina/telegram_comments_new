@@ -28,6 +28,12 @@ client_archive_message = 'Ниже вы найдете список клиент
 # Support message in archive menu when there are no archive clients
 empty_archive = 'Архив пока что пуст.'
 
+# Support message when there are no clients yet in clients' menu
+empty_client_list = 'Пока нет ни одного клиента. Хотите добавить первого?'
+
+# Support message when there are no clients yet in post-add menu
+empty_client_list_when_add = 'Пока не добавлено ни одного клиента. Для начала работы добавьте первого.'
+
 # Support message when client don't have tracking posts yet
 empty_post_list = 'У этого клиента пока нет отслеживаемых постов. Хотите добавить первый?'
 
