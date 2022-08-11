@@ -31,8 +31,6 @@ def init_base():
                     publication_date INTEGER,
                     subscribers_count INTEGER,
                     is_archive INTEGER,
-                    views INTEGER,
-                    reactions INTEGER,
                     CONSTRAINT posts_FK FOREIGN KEY (client_id) REFERENCES clients(client_id)
                     );
                    """)
@@ -41,8 +39,9 @@ def init_base():
     cursor.execute("""CREATE TABLE IF NOT EXISTS stats
                       (stat_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
                        post_id INTEGER,
-                       start_date INTEGER,
-                       end_date INTEGER,
+                       date INTEGER,
+                       views INTEGER,
+                       forwards INTEGER,
                        CONSTRAINT stats_FK FOREIGN KEY (post_id) REFERENCES posts(post_id)
                        );
                    """)
@@ -172,27 +171,24 @@ def post_info(post_id: int):
     con = sl.connect(config.workbase_name)
     cursor = con.cursor()
 
-    query = """SELECT channel_name, channel_post_id, post_name, publication_date, subscribers_count, views, reactions,
-                    (SELECT COUNT(comment_id)
-                    FROM comments
-                    WHERE post_id = ?
-                    GROUP BY post_id) as comments_all,
-                    (SELECT COUNT(comment_id)
-                    FROM comments
-                    WHERE post_id = ? AND is_new = 1
-                    GROUP BY post_id) as comments_new
+    query = """SELECT channel_name, channel_post_id, post_name, publication_date, subscribers_count,
+                    (SELECT views FROM stats WHERE post_id = ? ORDER BY views DESC LIMIT 1) as views,
+                    (SELECT forwards FROM stats WHERE post_id = ? ORDER BY forwards DESC LIMIT 1) as forwards,
+                    (SELECT COUNT(comment_id) FROM comments WHERE post_id = ? GROUP BY post_id) as comments_all,
+                    (SELECT COUNT(comment_id) FROM comments WHERE post_id = ? AND is_new = 1 GROUP BY post_id)
+                        as comments_new
             FROM posts
             WHERE post_id = ?
             """
-    params = (post_id, post_id, post_id)
+    params = (post_id, post_id, post_id, post_id, post_id)
 
     cursor.execute(query, params)
     result = cursor.fetchall()
     con.close()
 
     # Convert answer to dictionary
-    result_keys = ['channel_name', 'channel_post_id', 'post_name', 'publication_date', 'subscribers_count', 'views',
-                   'reactions', 'comments_all', 'comments_new']
+    result_keys = ['channel_name', 'channel_post_id', 'post_name', 'publication_date', 'subscribers_count',
+                   'views', 'forwards', 'comments_all', 'comments_new']
     result_values = list(*result)
     result_dict = dict(zip(result_keys, result_values))
 
@@ -232,7 +228,7 @@ def comment_info(post_id: int):
     # Convert comments info to list
     result_temp = []
     for i, comm in enumerate(comments_info):
-        correct_date = datetime.utcfromtimestamp(comm[0]).strftime('%Y-%m-%d %H:%M')
+        correct_date = datetime.utcfromtimestamp(comm[0]).strftime(config.date_format)
         comment_message = f'{correct_date}: {comm[1]}: {comm[2]}'
         result_temp.append(comment_message)
     result.append(result_temp)
@@ -402,12 +398,14 @@ def get_post_details(post_id):
     """
     post_inf = post_info(post_id)
 
+    publication_date = datetime.utcfromtimestamp(post_inf['publication_date']).strftime(config.date_format)
+
     post_info_message = f'Название поста: {post_inf["post_name"]}\n' \
                         f'Канал: {post_inf["channel_name"]}\n' \
-                        f'Дата публикации: {post_inf["publication_date"]}\n' \
+                        f'Дата публикации: {publication_date}\n' \
                         f'Подписчиков на момент публикации: {post_inf["subscribers_count"]}\n' \
                         f'Просмотров: {post_inf["views"]}\n' \
-                        f'Реакций: {post_inf["reactions"]}\n' \
+                        f'Репостов: {post_inf["forwards"]}\n' \
                         f'Комментариев всего: {post_inf["comments_all"]}\n' \
                         f'Новых комментариев: {post_inf["comments_new"]}\n'
 

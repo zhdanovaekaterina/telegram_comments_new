@@ -2,17 +2,20 @@
 # This module does all dirty work for the program.
 
 
-from distutils import dist
-from requests import post
+import requests
+from bs4 import BeautifulSoup
+import re
 import config
 import json
 import telethon
+import functions as f
 from datetime import date, datetime
 from telethon.sync import TelegramClient
 from telethon import connection, client
 from telethon.tl.functions.messages import GetHistoryRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon import functions, types
+import sqlite3 as sl
 
 
 client = TelegramClient(config.username, config.api_id, config.api_hash)
@@ -20,13 +23,20 @@ client.start()
 
 
 async def dump_comments(channel, post_id):
+    all_messages = []
     async for message in client.iter_messages(channel, reply_to=post_id, reverse=True):
         if isinstance(message.sender, telethon.tl.types.User):
-            mess_date = message.date.strftime(config.date_format)
+            mess_date = message.date.timestamp()
             new_rec = [mess_date, message.sender.username, message.sender.first_name, message.text]
         else:
             new_rec = None
-        return new_rec
+        all_messages.append(new_rec)
+
+    for i, mess in enumerate(all_messages):
+        if all_messages[i] is None:
+            del all_messages[i]
+
+    return all_messages
 
 
 async def dump_post_info(channel, post_id):
@@ -58,7 +68,7 @@ async def dump_post_info(channel, post_id):
     forwards = all_messages[0]['forwards']
     replies = all_messages[0]['replies']['replies']
 
-    publication_date = publication_date.strftime(config.date_format)
+    publication_date = publication_date.timestamp()
 
     all_data = {'publication_date': publication_date,
                 'views': views,
@@ -71,29 +81,117 @@ async def dump_post_info(channel, post_id):
     #     json.dump(all_messages, outfile, ensure_ascii=False, cls=DateTimeEncoder)
 
 
-async def dump_subscribers_count(channel):
-    all_info = []
+def dump_subscribers_count(channel: str):
+    """Takes channel name and returns the number of its subscribers."""
+    url = f'https://tgstat.ru/channel/@{channel}'
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:45.0) Gecko/20100101 Firefox/45.0'
+    }
+    r = requests.get(url, headers=headers)
+    r = r.text
 
-    result = client(GetFullChannelRequest(channel=channel))
-    print(result)
+    try:
+        # Extract raw subscribers count
+        soup = BeautifulSoup(r, 'html.parser').find('h2').get_text()
+
+        # Convert subscribers count to int
+        subscribers_count = re.findall(r'\d+', soup)
+        subscribers_count = int(''.join(subscribers_count))
+    except AttributeError:
+        subscribers_count = 0
+
+    return subscribers_count
 
 
-def input_url():
-    """Takes a link and returns channel and post number."""
-    post_input = input("Give me a link to the post: ")
-    post_id = int(post_input.split('/')[-1])  # returns post number
-    url = post_input.split('/')
-    del url[-1]
-    url = '/'.join(url) + '/'  # returns channel link
-    return url, post_id
+async def collecting_data(post_id: int, is_first_collecting: bool):
+    """Takes post_id and flag if it is first time."""
+
+    # Get post attributes from the base
+    query_case = 'select_2'
+    elements = ['channel_name', 'channel_post_id', 'posts', 'post_id']
+    parametrs = (post_id,)
+    post_info = f.query_constructor(query_case, elements, parametrs)
+
+    # Create channel link and channel object
+    channel_link = f'https://t.me/{post_info[0][0]}'
+    channel = await client.get_entity(channel_link)
+    channel_post_id = post_info[0][1]
+
+    # Dump comments
+    all_comments = await dump_comments(channel, channel_post_id)
+
+    # Dump post info
+    all_data = await dump_post_info(channel, channel_post_id)
+    if is_first_collecting:
+        all_data['subscribers_count'] = dump_subscribers_count(post_info[0][0])
+
+    return all_data, all_comments
+
+
+def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
+
+    # Open connection
+    con = sl.connect(config.workbase_name)
+    cursor = con.cursor()
+
+    # Put data into posts
+    if is_first_collecting:
+        query = 'UPDATE posts SET publication_date = ?, subscribers_count = ? WHERE post_id = ?'
+        parametrs = (data['publication_date'], data['subscribers_count'], post_id)
+        cursor.execute(query, parametrs)
+
+    # Put data into stats
+    date_now = datetime.now().timestamp()
+    query = 'INSERT INTO stats (post_id, date, views, forwards) VALUES (?, ?, ?, ?)'
+    parametrs = (post_id, date_now, data['views'], data['forwards'])
+    cursor.execute(query, parametrs)
+
+    comments_to_load = []
+    if not is_first_collecting:
+
+        # Load all previous comments from the base
+        query = 'SELECT comment_date FROM comments WHERE post_id = ?'
+        parametrs = (post_id,)
+        cursor.execute(query, parametrs)
+        old_comments = cursor.fetchall()
+
+        # Compare old and new comment sets
+        old_comments = set(*old_comments)
+        new_comments = set()
+        for comm in comments:
+            new_comments.add(comm[0])
+        diff_set = new_comments - old_comments
+
+        # Update list of comments to load
+        for comm in comments:
+            if comm[0] in diff_set:
+                comm.insert(0, post_id)
+                comm.append('1')
+                comm = tuple(comm)
+                comments_to_load.append(comm)
+
+    else:
+        for comm in comments:
+            comm.insert(0, post_id)
+            comm.append('1')
+            comm = tuple(comm)
+            comments_to_load.append(comm)
+
+    # Put comments into comments
+    query = 'INSERT INTO comments (post_id, comment_date, author_username, author, comment_text, is_new) ' \
+            'VALUES (?, ?, ?, ?, ?, ?)'
+    cursor.executemany(query, comments_to_load)
+
+    # Commit and close connection
+    con.commit()
+    con.close()
 
 
 async def main():
-    url, post_id = input_url()
-    channel = await client.get_entity(url)
-    comments = await dump_comments(channel, post_id)
-    all_data = await dump_post_info(channel, post_id)
-    await dump_subscribers_count(channel)
+    post_id = 5  # Test canape post
+    is_first_collecting = False  # Test flag
+    data, comments = await collecting_data(post_id, is_first_collecting)
+    put_data_tobase(post_id, data, comments, is_first_collecting)
     print('Done!')
 
 

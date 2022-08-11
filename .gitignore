@@ -3,7 +3,7 @@ config.py
 venv
 test_post_object.py
 *.db
-base_init.py
+test_functions.py
 *.csv
 *.session
 *.json
