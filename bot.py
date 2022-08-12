@@ -323,13 +323,8 @@ def finish_post_add(message):
         is_in_base = f.check_post(config.post_info_temp_name)
         if not is_in_base[0]:
             post_added = f.add_post(config.post_info_temp_name)
-            post_id = post_added[1]
-            list_of_buttons = types.InlineKeyboardMarkup()
-            go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
-                                                           callback_data=f'select_active_post_{post_id}')
-            list_of_buttons.add(go_to_post_button)
             os.remove(config.post_info_temp_name)
-            bot.send_message(message.chat.id, messages.success_add_post, reply_markup=list_of_buttons)
+            bot.send_message(message.chat.id, messages.success_add_post_first_time)
         else:
             list_of_buttons = types.InlineKeyboardMarkup()
             yes_button = types.InlineKeyboardButton(text=messages.add_another_post,

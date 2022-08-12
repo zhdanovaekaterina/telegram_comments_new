@@ -75,6 +75,9 @@ ask_password = 'Для удаления поста введите пароль:'
 # Successfully added post to db
 success_add_post = 'Пост успешно добавлен к отслеживанию.'
 
+# Successfully added post to db (first time)
+success_add_post_first_time = 'Пост успешно добавлен к отслеживанию. Первые данные появятся в течение 5-10 минут.'
+
 # Post already exists in base
 post_already_exists = 'Такой пост уже есть в базе! Хотите добавить другой пост?'
 

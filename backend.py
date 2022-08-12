@@ -9,12 +9,10 @@ import config
 import json
 import telethon
 import functions as f
-from datetime import date, datetime
+from datetime import datetime
 from telethon.sync import TelegramClient
-from telethon import connection, client
+from telethon import client
 from telethon.tl.functions.messages import GetHistoryRequest
-from telethon.tl.functions.channels import GetFullChannelRequest
-from telethon import functions, types
 import sqlite3 as sl
 
 
@@ -23,18 +21,24 @@ client.start()
 
 
 async def dump_comments(channel, post_id):
-    all_messages = []
-    async for message in client.iter_messages(channel, reply_to=post_id, reverse=True):
-        if isinstance(message.sender, telethon.tl.types.User):
-            mess_date = message.date.timestamp()
-            new_rec = [mess_date, message.sender.username, message.sender.first_name, message.text]
-        else:
-            new_rec = None
-        all_messages.append(new_rec)
 
-    for i, mess in enumerate(all_messages):
-        if all_messages[i] is None:
-            del all_messages[i]
+    # Error processing if channel comments turned off
+    try:
+        all_messages = []
+        async for message in client.iter_messages(channel, reply_to=post_id, reverse=True):
+            if isinstance(message.sender, telethon.tl.types.User):
+                mess_date = message.date.timestamp()
+                new_rec = [mess_date, message.sender.username, message.sender.first_name, message.text]
+            else:
+                new_rec = None
+            all_messages.append(new_rec)
+
+        for i, mess in enumerate(all_messages):
+            if all_messages[i] is None:
+                del all_messages[i]
+
+    except telethon.errors.rpcerrorlist.MsgIdInvalidError:
+        all_messages = None
 
     return all_messages
 
@@ -63,27 +67,22 @@ async def dump_post_info(channel, post_id):
     for message in messages:
         all_messages.append(message.to_dict())
 
-    publication_date = all_messages[0]['edit_date']
+    publication_date = all_messages[0]['date']
     views = all_messages[0]['views']
     forwards = all_messages[0]['forwards']
-    replies = all_messages[0]['replies']['replies']
 
     publication_date = publication_date.timestamp()
 
     all_data = {'publication_date': publication_date,
                 'views': views,
-                'forwards': forwards,
-                'replies': replies}
+                'forwards': forwards}
 
     return all_data
 
-    # with open('channel_messages.json', 'w', encoding='utf8') as outfile:
-    #     json.dump(all_messages, outfile, ensure_ascii=False, cls=DateTimeEncoder)
 
-
-def dump_subscribers_count(channel: str):
+def dump_subscribers_count(channel_name: str):
     """Takes channel name and returns the number of its subscribers."""
-    url = f'https://tgstat.ru/channel/@{channel}'
+    url = f'https://tgstat.ru/channel/@{channel_name}'
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.9; rv:45.0) Gecko/20100101 Firefox/45.0'
     }
@@ -103,27 +102,21 @@ def dump_subscribers_count(channel: str):
     return subscribers_count
 
 
-async def collecting_data(post_id: int, is_first_collecting: bool):
+async def collecting_data(post: list):
     """Takes post_id and flag if it is first time."""
 
-    # Get post attributes from the base
-    query_case = 'select_2'
-    elements = ['channel_name', 'channel_post_id', 'posts', 'post_id']
-    parametrs = (post_id,)
-    post_info = f.query_constructor(query_case, elements, parametrs)
-
     # Create channel link and channel object
-    channel_link = f'https://t.me/{post_info[0][0]}'
+    channel_link = f'https://t.me/{post[0][1]}'
     channel = await client.get_entity(channel_link)
-    channel_post_id = post_info[0][1]
+    channel_post_id = post[0][2]
 
     # Dump comments
     all_comments = await dump_comments(channel, channel_post_id)
 
     # Dump post info
     all_data = await dump_post_info(channel, channel_post_id)
-    if is_first_collecting:
-        all_data['subscribers_count'] = dump_subscribers_count(post_info[0][0])
+    if post[1]:
+        all_data['subscribers_count'] = dump_subscribers_count(post[0][1])
 
     return all_data, all_comments
 
@@ -146,52 +139,79 @@ def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
     parametrs = (post_id, date_now, data['views'], data['forwards'])
     cursor.execute(query, parametrs)
 
-    comments_to_load = []
-    if not is_first_collecting:
+    if comments is not None:
+        comments_to_load = []
+        if not is_first_collecting:
 
-        # Load all previous comments from the base
-        query = 'SELECT comment_date FROM comments WHERE post_id = ?'
-        parametrs = (post_id,)
-        cursor.execute(query, parametrs)
-        old_comments = cursor.fetchall()
+            # Load all previous comments from the base
+            query = 'SELECT comment_date FROM comments WHERE post_id = ?'
+            parametrs = (post_id,)
+            cursor.execute(query, parametrs)
+            old_comments = cursor.fetchall()
 
-        # Compare old and new comment sets
-        old_comments = set(*old_comments)
-        new_comments = set()
-        for comm in comments:
-            new_comments.add(comm[0])
-        diff_set = new_comments - old_comments
+            # Compare old and new comment sets
+            old_comments_1 = set()
+            for comm in old_comments:
+                old_comments_1.add(comm[0])
 
-        # Update list of comments to load
-        for comm in comments:
-            if comm[0] in diff_set:
+            new_comments = set()
+            for comm in comments:
+                new_comments.add(comm[0])
+            diff_set = new_comments - old_comments_1
+
+            # Update list of comments to load
+            for comm in comments:
+                if comm[0] in diff_set:
+                    comm.insert(0, post_id)
+                    comm.append('1')
+                    comm = tuple(comm)
+                    comments_to_load.append(comm)
+
+        else:
+            for comm in comments:
                 comm.insert(0, post_id)
                 comm.append('1')
                 comm = tuple(comm)
                 comments_to_load.append(comm)
 
-    else:
-        for comm in comments:
-            comm.insert(0, post_id)
-            comm.append('1')
-            comm = tuple(comm)
-            comments_to_load.append(comm)
-
-    # Put comments into comments
-    query = 'INSERT INTO comments (post_id, comment_date, author_username, author, comment_text, is_new) ' \
-            'VALUES (?, ?, ?, ?, ?, ?)'
-    cursor.executemany(query, comments_to_load)
+        # Put comments into comments
+        query = 'INSERT INTO comments (post_id, comment_date, author_username, author, comment_text, is_new) ' \
+                'VALUES (?, ?, ?, ?, ?, ?)'
+        cursor.executemany(query, comments_to_load)
 
     # Commit and close connection
     con.commit()
     con.close()
 
 
+def get_active_post_list():
+
+    # Get post attributes from the base
+    query_case = 'select_6'
+    elements = ['post_id', 'channel_name', 'channel_post_id', 'publication_date', 'posts', 'is_archive']
+    parametrs = (0,)
+    post_info = f.query_constructor(query_case, elements, parametrs)
+
+    full_data = []
+    for post in post_info:
+        full_post = []
+        is_first_collecting = False if post[3] is not None else True
+        full_post.append(post)
+        full_post.append(is_first_collecting)
+        full_data.append(full_post)
+
+    return full_data
+
+
 async def main():
-    post_id = 5  # Test canape post
-    is_first_collecting = False  # Test flag
-    data, comments = await collecting_data(post_id, is_first_collecting)
-    put_data_tobase(post_id, data, comments, is_first_collecting)
+
+    # Get all active posts from the base
+    full_data = get_active_post_list()
+
+    for post in full_data:
+        data, comments = await collecting_data(post)
+        put_data_tobase(post[0][0], data, comments, post[1])
+
     print('Done!')
 
 
