@@ -1,34 +1,36 @@
 # This Python file uses the following encoding: ascii
 # This module does all dirty work for the program.
-
+import asyncio
+import json
+import re
+import sqlite3 as sl
+import time as t
+from datetime import datetime
 
 import requests
-from bs4 import BeautifulSoup
-import re
-import config
-import json
 import telethon
-import functions as f
-from datetime import datetime
-from telethon.sync import TelegramClient
+import schedule
+from bs4 import BeautifulSoup
 from telethon import client
+from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
-import sqlite3 as sl
 
+import config
+import functions as f
 
 client = TelegramClient(config.username, config.api_id, config.api_hash)
 client.start()
 
 
 async def dump_comments(channel, post_id):
-
     # Error processing if channel comments turned off
     try:
         all_messages = []
         async for message in client.iter_messages(channel, reply_to=post_id, reverse=True):
             if isinstance(message.sender, telethon.tl.types.User):
                 mess_date = message.date.timestamp()
-                new_rec = [mess_date, message.sender.username, message.sender.first_name, message.text]
+                message_text = message.text[:50] + '...' if len(message.text) > 50 else message.text
+                new_rec = [mess_date, message.sender.username, message.sender.first_name, message_text]
             else:
                 new_rec = None
             all_messages.append(new_rec)
@@ -56,7 +58,7 @@ async def dump_post_info(channel, post_id):
 
     history = await client(GetHistoryRequest(
         peer=channel,
-        offset_id=(post_id+1),
+        offset_id=(post_id + 1),
         offset_date=None,
         add_offset=0,
         limit=1, max_id=0, min_id=0,
@@ -122,7 +124,6 @@ async def collecting_data(post: list):
 
 
 def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
-
     # Open connection
     con = sl.connect(config.workbase_name)
     cursor = con.cursor()
@@ -185,7 +186,6 @@ def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
 
 
 def get_active_post_list():
-
     # Get post attributes from the base
     query_case = 'select_6'
     elements = ['post_id', 'channel_name', 'channel_post_id', 'publication_date', 'posts', 'is_archive']
@@ -215,5 +215,16 @@ async def main():
     print('Done!')
 
 
-with client:
-    client.loop.run_until_complete(main())
+def main_main():
+    def main_main_main():
+        with client:
+            client.loop.run_until_complete(main())
+    schedule.every(15).minutes.do(main_main_main)
+
+    while True:
+        schedule.run_pending()
+        t.sleep(5)
+
+
+if __name__ == '__main__':
+    main_main()

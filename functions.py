@@ -1,9 +1,11 @@
-from telebot import types
-import config
-import csv
 import sqlite3 as sl
 import re
+import csv
 from datetime import datetime
+
+from telebot import types
+
+import config
 
 
 def init_base():
@@ -13,6 +15,12 @@ def init_base():
 
     # Enable foreign keys
     cursor.execute("""PRAGMA foreign_keys=on""")
+
+    # Create table 'users'
+    cursor.execute("""CREATE TABLE IF NOT EXISTS users
+                      (user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       user_name INTEGER)
+                   """)
 
     # Create table 'clients'
     cursor.execute("""CREATE TABLE IF NOT EXISTS clients
@@ -59,6 +67,11 @@ def init_base():
                        );
                    """)
 
+    # Put developer's id into the base
+    query = 'INSERT INTO users (user_name) VALUES (?)'
+    values = (config.developer_id,)
+    cursor.execute(query, values)
+
     con.commit()
     con.close()
 
@@ -73,6 +86,7 @@ def query_constructor(query_type: str, elements: list, parametrs: tuple):
                    'select_4': 'SELECT *, * FROM * WHERE * = ? AND * = ?',
                    'select_5': 'SELECT *, * FROM * LEFT JOIN * USING(*) GROUP BY * HAVING * > ?',
                    'select_6': 'SELECT *, *, *, * FROM * WHERE * = ?',
+                   'select_7': 'SELECT *, *, * FROM * WHERE * = ? AND * = ?',
                    'update_1': 'UPDATE * SET * = ? WHERE * = ?',
                    'insert_1': 'INSERT INTO * (*, *) VALUES (?, ?)',
                    'insert_2': 'INSERT INTO * (*, *, *, *, *) VALUES (?, ?, ?, ?, ?)',
@@ -195,7 +209,7 @@ def post_info(post_id: int):
     return result_dict
 
 
-def comment_info(post_id: int):
+def comment_info(post_id: int, need_only_new=0):
     """Takes post_id (unique number inside db) and returns its comments. Also returns post link.
     :param: post_id: post id inside database;
     :return: comments_info_message: message with date, author and text for each comment;
@@ -203,18 +217,24 @@ def comment_info(post_id: int):
     """
     result = []
 
-    parametrs = (post_id,)
-
+    parametrs_1 = (post_id,)
     query_case_1 = 'select_2'
     elements_1 = ['channel_name', 'channel_post_id', 'posts', 'post_id']
-    post_info = query_constructor(query_case_1, elements_1, parametrs)
+    post_info = query_constructor(query_case_1, elements_1, parametrs_1)
 
     if len(post_info) == 0:
         return None
 
-    query_case_2 = 'select_6'
-    elements_2 = ['comment_date', 'author', 'comment_text', 'is_new', 'comments', 'post_id']
-    comments_info = query_constructor(query_case_2, elements_2, parametrs)
+    if need_only_new == 1:
+        parametrs_2 = (post_id, 1)
+        query_case_2 = 'select_7'
+        elements_2 = ['comment_date', 'author', 'comment_text', 'comments', 'post_id', 'is_new']
+        comments_info = query_constructor(query_case_2, elements_2, parametrs_2)
+    else:
+        parametrs_3 = (post_id,)
+        query_case_3 = 'select_6'
+        elements_3 = ['comment_date', 'author', 'comment_text', 'is_new', 'comments', 'post_id']
+        comments_info = query_constructor(query_case_3, elements_3, parametrs_3)
 
     if len(comments_info) == 0:
         return None
@@ -406,13 +426,108 @@ def get_post_details(post_id):
                         f'Подписчиков на момент публикации: {post_inf["subscribers_count"]}\n' \
                         f'Просмотров: {post_inf["views"]}\n' \
                         f'Репостов: {post_inf["forwards"]}\n' \
-                        f'Комментариев всего: {post_inf["comments_all"]}\n' \
-                        f'Новых комментариев: {post_inf["comments_new"]}\n'
+                        f'Комментариев всего: {post_inf["comments_all"]}\n'
 
     post_link = f'https://t.me/{post_inf["channel_name"]}/{post_inf["channel_post_id"]}'
 
     return post_info_message, post_link
 
 
+def list_of_user_ids():
+    """Procedure which returns actual white list of users."""
+    con = sl.connect(config.workbase_name)
+    cursor = con.cursor()
+    cursor.execute('SELECT user_name FROM users')
+    raw_users = cursor.fetchall()
+    con.close()
+
+    list_of_users = [int(user[0]) for user in raw_users]
+    return list_of_users
+
+
+def add_user(user_id):
+    """Procedure which adds user to white list."""
+    con = sl.connect(config.workbase_name)
+    cursor = con.cursor()
+
+    query = 'INSERT INTO users (user_name) VALUES (?)'
+    value = (user_id,)
+
+    cursor.execute(query, value)
+    con.commit()
+    con.close()
+
+
+def your_user_id(user_id):
+    message = f'При обращении назовите свой user_id: {user_id}'
+    return message
+
+
+def get_new_comments():
+    """Connect the base and get the list of new comments.
+    Returns info message and list of post ids where there are some updates."""
+    con = sl.connect(config.workbase_name)
+    cursor = con.cursor()
+
+    query = 'SELECT post_id, client_name, post_name, COUNT(comment_id) ' \
+            'FROM comments LEFT JOIN posts USING(post_id) LEFT JOIN clients USING(client_id) ' \
+            'WHERE comments.is_new = 1 ' \
+            'GROUP BY client_name, post_name'
+
+    cursor.execute(query)
+    raw_new_comments = cursor.fetchall()
+    con.close()
+
+    have_updates = False if raw_new_comments == [] else True
+    return raw_new_comments, have_updates
+
+
+def compose_notification_message(raw_new_comments):
+    time_now = datetime.now().strftime('%H:%M')
+    comments_info_message = [f'Сводка на {time_now}\nУ некоторых клиентов есть новые комментарии под постами:\n']
+    all_clients = set([post[1] for post in raw_new_comments])
+    for client in all_clients:
+        all_client_comments = []
+        for post in raw_new_comments:
+            if post[1] == client:
+                temp_message = f'{post[2]}: +{post[3]}'
+                all_client_comments.append(temp_message)
+        comments = '\n'.join(all_client_comments)
+        comments_client_info_message = f'{client}:\n' \
+                                       f'{comments}\n'
+        comments_info_message.append(comments_client_info_message)
+    comments_info_message.append('Чтобы проверить обновления, выберите пост в списке ниже.')
+
+    comments_info_message = '\n'.join(comments_info_message)
+    return comments_info_message
+
+
+def prepare_comments():
+    raw_comments, have_updates = get_new_comments()
+    if have_updates:
+        notification_message = compose_notification_message(raw_comments)
+        list_of_users = list_of_user_ids()
+        list_of_buttons = types.InlineKeyboardMarkup()
+        for post in raw_comments:
+            button = types.InlineKeyboardButton(text=f'{post[1]} - {post[2]}',
+                                                callback_data=f'give_comments_list_1_{post[0]}')
+            list_of_buttons.add(button)
+
+        return True, list_of_users, notification_message, list_of_buttons
+    else:
+        return False, False, False, False
+
+
+def delete_is_new_flags(post_id):
+    """Takes list of post_id's and mark all its comments as read."""
+    query_type = 'update_1'
+    elements = ['comments', 'is_new', 'post_id']
+    parametrs = (0, post_id)
+    query_constructor(query_type, elements, parametrs)
+
+
 if __name__ == '__main__':
+    # raw_comments, have_updates, post_ids = get_new_comments()
+    # notification_message = compose_notification_message(raw_comments, have_updates)
+    # print(notification_message, post_ids)
     pass

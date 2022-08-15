@@ -2,22 +2,33 @@
 # This module describes the work of Telegram bot interface.
 # The goal is to make the work with comments tracking avaliable for marketer.
 
-import telebot
-from telebot import types
-import config
-import functions as f
-import messages
 import re
 import csv
 import os
+import time
+from datetime import time
+
+import schedule
+import telebot
+from telebot import types
+
+import config
+import functions as f
+import messages
 
 
 bot = telebot.TeleBot(config.bot_token)
 bot.delete_webhook()
 
-# <-- Base init (if not exists) -->
-if not os.path.exists(config.workbase_name):
-    f.init_base()
+
+# <-- Notifications section -->
+
+
+@bot.message_handler(func=lambda message: message.chat.id not in f.list_of_user_ids())
+def check_user_id(message):
+    bot.send_message(message.chat.id, messages.no_permission)
+    your_user_id = f.your_user_id(message.chat.id)
+    bot.send_message(message.chat.id, your_user_id)
 
 
 # <-- Command handlers section -->
@@ -81,6 +92,16 @@ def archive_command(message):
         bot.send_message(message.chat.id, messages.client_archive_message, reply_markup=list_of_buttons)
     else:
         bot.send_message(message.chat.id, messages.empty_archive)
+
+
+@bot.message_handler(commands=['updates'])
+def updates_command(message):
+    """Sends the list of new comments."""
+    flag, list_of_users, notification_message, list_of_buttons = f.prepare_comments()
+    if flag:
+        bot.send_message(message.chat.id, notification_message, reply_markup=list_of_buttons)
+    else:
+        bot.send_message(message.chat.id, messages.no_updates)
 
 
 # <-- Callback handlers section -->
@@ -150,7 +171,7 @@ def select_active_post(call):
     # TODO: add a query to delete is_new flags if there was a click on post link
     list_of_buttons = types.InlineKeyboardMarkup()
     watch_comments_button = types.InlineKeyboardButton(text=messages.watch_comments,
-                                                       callback_data=f'give_comments_list_{post_id}')
+                                                       callback_data=f'give_comments_list_0_{post_id}')
     go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
                                                    url=post_info[1])
     archive_post_button = types.InlineKeyboardButton(text=messages.archive_post,
@@ -164,7 +185,10 @@ def give_comments_list(call):
     """Sends the list of comments under the selected post."""
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
-    comments_info = f.comment_info(post_id)
+    need_only_new = int(call.data.split('_')[-2])
+    comments_info = f.comment_info(post_id, need_only_new)
+    if need_only_new == 1:
+        f.delete_is_new_flags(post_id)
     # TODO: add a query to delete is_new flags if comments are seen
     if comments_info is not None:
         list_of_buttons = types.InlineKeyboardMarkup()
@@ -396,7 +420,11 @@ def delete_post(message):
         bot.register_next_step_handler(msg, delete_post)
 
 
-# <-- Notifications section -->
+if __name__ == '__main__':
 
+    # Base init (if not exists)
+    if not os.path.exists(config.workbase_name):
+        f.init_base()
 
-bot.polling()
+    # Bot working
+    bot.polling()

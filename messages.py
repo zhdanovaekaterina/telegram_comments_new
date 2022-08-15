@@ -4,6 +4,7 @@
 help_message = '/help - помощь\n' \
                '/add - добавить пост\n' \
                '/clients - добавить клиента\n' \
+               '/updates - посмотреть новые комментарии\n' \
                '/archive - архив\n' \
                'STOP - сбросить текущую команду'
 
@@ -102,6 +103,17 @@ deleted_successfully = 'Пост успешно удален из базы.'
 # Wrong password typed
 wrong_password = 'Пароль введен неверно. Попробуйте еще раз.'
 
+# User don't have permission to use bot
+no_permission = 'У вас нет доступа для использования этого бота. ' \
+                'Для начала работы обратитесь к администратору @zhdanovakaterina.'
+
+# User added
+user_added = 'Вы успешно добавлены в список пользователей, которым разрешено пользоваться ботом. ' \
+             f'Для начала работы выберите любую команду:\n{help_message}'
+
+# There are no updates by this time
+no_updates = 'Новых комментариев пока что нет.'
+
 
 # <-- Buttons text section -->
 
@@ -140,3 +152,6 @@ track_again = 'Отслеживать снова'
 
 # Delete button
 delete_post = 'Удалить окончательно'
+
+# Check updates button
+check_for_updates = 'Проверить обновления'
