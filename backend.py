@@ -1,6 +1,5 @@
 # This Python file uses the following encoding: ascii
 # This module does all dirty work for the program.
-import asyncio
 import json
 import re
 import sqlite3 as sl
@@ -16,7 +15,7 @@ from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 
 import config
-import functions as f
+from modules import functions as f
 
 client = TelegramClient(config.username, config.api_id, config.api_hash)
 client.start()

@@ -445,15 +445,14 @@ def list_of_user_ids():
     return list_of_users
 
 
-def add_user(user_id):
+def add_user(values):
     """Procedure which adds user to white list."""
     con = sl.connect(config.workbase_name)
     cursor = con.cursor()
 
     query = 'INSERT INTO users (user_name) VALUES (?)'
-    value = (user_id,)
 
-    cursor.execute(query, value)
+    cursor.executemany(query, values)
     con.commit()
     con.close()
 
@@ -524,6 +523,16 @@ def delete_is_new_flags(post_id):
     elements = ['comments', 'is_new', 'post_id']
     parametrs = (0, post_id)
     query_constructor(query_type, elements, parametrs)
+
+
+def delete_all_users():
+    """Delete all users from the white list."""
+    con = sl.connect(config.workbase_name)
+    cursor = con.cursor()
+    cursor.execute('DELETE FROM users')
+    cursor.execute('REINDEX users')
+    con.commit()
+    con.close()
 
 
 if __name__ == '__main__':

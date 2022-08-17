@@ -4,8 +4,7 @@ import schedule
 import telebot
 
 import config
-import functions as f
-
+from modules import functions as f
 
 bot = telebot.TeleBot(config.bot_token)
 bot.delete_webhook()
@@ -26,4 +25,4 @@ def send_new_comments():
 
 
 if __name__ == '__main__':
-    send_new_comments()
+    pass

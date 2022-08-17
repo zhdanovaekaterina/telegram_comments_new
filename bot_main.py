@@ -5,17 +5,12 @@
 import re
 import csv
 import os
-import time
-from datetime import time
 
-import schedule
 import telebot
 from telebot import types
 
 import config
-import functions as f
-import messages
-
+from modules import functions as f, messages
 
 bot = telebot.TeleBot(config.bot_token)
 bot.delete_webhook()
@@ -102,6 +97,13 @@ def updates_command(message):
         bot.send_message(message.chat.id, notification_message, reply_markup=list_of_buttons)
     else:
         bot.send_message(message.chat.id, messages.no_updates)
+
+
+@bot.message_handler(commands=['crash'])
+def updates_command(message):
+    """Deletes all users from white list."""
+    f.delete_all_users()
+    bot.send_message(message.chat.id, messages.no_users)
 
 
 # <-- Callback handlers section -->
@@ -420,11 +422,14 @@ def delete_post(message):
         bot.register_next_step_handler(msg, delete_post)
 
 
-if __name__ == '__main__':
-
+def main():
     # Base init (if not exists)
     if not os.path.exists(config.workbase_name):
         f.init_base()
 
     # Bot working
     bot.polling()
+
+
+if __name__ == '__main__':
+    pass
