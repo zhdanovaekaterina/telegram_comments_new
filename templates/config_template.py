@@ -15,3 +15,9 @@ post_id_temp_name = 'post_id_temp.csv'
 # Other constants
 date_format = '%Y-%m-%d %H:%M'
 developer_id = 11111
+
+# MySQL access
+host = ''
+port = 3306
+user_name = ''
+user_password = ''
