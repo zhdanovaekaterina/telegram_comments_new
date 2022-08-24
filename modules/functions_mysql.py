@@ -207,10 +207,12 @@ def add_post(db: Database, file_link: str):
     return post_id
 
 
-def track_status(db: Database, post_id: int, to_archive: bool):
+def track_status(post_id: int, to_archive: bool, db=None):
     """The procedure, returns the post into the active or archive state (depend on switch flag).
     Checks if it was the last client's post and returns client to active or archive state if so as well."""
     to_archive = 1 if to_archive else 0
+    if db is None:
+        db = Database(config.host, config.port, config.user_name, config.user_password)
 
     query = 'SELECT client_id FROM posts WHERE post_id = %s'
     params = (post_id,)

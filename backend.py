@@ -9,6 +9,7 @@ from datetime import datetime
 import requests
 import telethon
 import schedule
+import pprint
 from bs4 import BeautifulSoup
 from telethon import client
 from telethon.sync import TelegramClient
@@ -68,15 +69,20 @@ async def dump_post_info(channel, post_id):
     for message in messages:
         all_messages.append(message.to_dict())
 
-    publication_date = all_messages[0]['date']
-    views = all_messages[0]['views']
-    forwards = all_messages[0]['forwards']
+    # Check if the ID received match the ID asked
+    if all_messages[0]['id'] != post_id:
+        print('Post deleted or doensn\'t exist')
+        all_data = False
+    else:
+        publication_date = all_messages[0]['date']
+        views = all_messages[0]['views']
+        forwards = all_messages[0]['forwards']
 
-    publication_date = publication_date.timestamp()
+        publication_date = publication_date.timestamp()
 
-    all_data = {'publication_date': publication_date,
-                'views': views,
-                'forwards': forwards}
+        all_data = {'publication_date': publication_date,
+                    'views': views,
+                    'forwards': forwards}
 
     return all_data
 
@@ -204,6 +210,8 @@ def get_active_post_list():
 
 async def main():
 
+    print('Started working...')
+
     # Get all active posts from the base
     full_data = get_active_post_list()
 
@@ -218,7 +226,7 @@ def main_main():
     def main_main_main():
         with client:
             client.loop.run_until_complete(main())
-    schedule.every(15).minutes.do(main_main_main)
+    schedule.every(5).seconds.do(main_main_main)
 
     while True:
         schedule.run_pending()

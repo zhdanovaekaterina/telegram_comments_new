@@ -15,7 +15,7 @@ from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 
 import config
-from modules import functions as f
+from modules import functions_mysql as f
 from classes.database import Database
 
 client = TelegramClient(config.username, config.api_id, config.api_hash)
@@ -69,15 +69,19 @@ async def dump_post_info(channel, post_id):
     for message in messages:
         all_messages.append(message.to_dict())
 
-    publication_date = all_messages[0]['date']
-    views = all_messages[0]['views']
-    forwards = all_messages[0]['forwards']
+    # Check if the ID received match the ID asked
+    if all_messages[0]['id'] != post_id:
+        all_data = False
+    else:
+        publication_date = all_messages[0]['date']
+        views = all_messages[0]['views']
+        forwards = all_messages[0]['forwards']
 
-    publication_date = publication_date.timestamp()
+        publication_date = publication_date.timestamp()
 
-    all_data = {'publication_date': publication_date,
-                'views': views,
-                'forwards': forwards}
+        all_data = {'publication_date': publication_date,
+                    'views': views,
+                    'forwards': forwards}
 
     return all_data
 
@@ -117,6 +121,9 @@ async def collecting_data(post: list):
 
     # Dump post info
     all_data = await dump_post_info(channel, channel_post_id)
+    if not all_data:
+        f.track_status(post[0], True)
+
     if post[1]:
         all_data['subscribers_count'] = dump_subscribers_count(post[0][1])
 
@@ -197,9 +204,9 @@ async def main():
 
     for post in full_data:
         data, comments = await collecting_data(post)
+        if not data:
+            continue
         put_data_tobase(post[0][0], data, comments, post[1])
-
-    print('Done!')
 
 
 def main_main():

@@ -242,8 +242,7 @@ def track_again(call):
     """Returns archived post to tracking."""
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
-    to_archive = False
-    f.track_status(post_id, to_archive)
+    f.track_status(post_id, False)
     bot.send_message(call.from_user.id, messages.success_add_post)
 
 
@@ -292,8 +291,7 @@ def archive_post(call):
     """Starts the move-to-archive procedure."""
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
-    to_archive = True
-    f.track_status(post_id, to_archive)
+    f.track_status(post_id, True)
     bot.send_message(call.from_user.id, messages.success_archive_post)
 
 
