@@ -18,18 +18,18 @@ import config
 from modules import functions_mysql as f
 from classes.database import Database
 
-client = TelegramClient(config.username, config.api_id, config.api_hash)
-client.start()
+tg_client = TelegramClient(config.username, config.api_id, config.api_hash)
+tg_client.start()
 
 
 async def dump_comments(channel, post_id):
     # Error processing if channel comments turned off
     try:
         all_messages = []
-        async for message in client.iter_messages(channel, reply_to=post_id, reverse=True):
+        async for message in tg_client.iter_messages(channel, reply_to=post_id, reverse=True):
             if isinstance(message.sender, telethon.tl.types.User):
                 mess_date = message.date.timestamp()
-                message_text = message.text[:50] + '...' if len(message.text) > 50 else message.text
+                message_text = message.text[:45] + '...' if len(message.text) > 45 else message.text
                 new_rec = [mess_date, message.sender.username, message.sender.first_name, message_text]
             else:
                 new_rec = None
@@ -56,7 +56,7 @@ async def dump_post_info(channel, post_id):
                 return list(o)
             return json.JSONEncoder.default(self, o)
 
-    history = await client(GetHistoryRequest(
+    history = await tg_client(GetHistoryRequest(
         peer=channel,
         offset_id=(post_id + 1),
         offset_date=None,
@@ -113,7 +113,7 @@ async def collecting_data(post: list):
 
     # Create channel link and channel object
     channel_link = f'https://t.me/{post[0][1]}'
-    channel = await client.get_entity(channel_link)
+    channel = await tg_client.get_entity(channel_link)
     channel_post_id = post[0][2]
 
     # Dump comments
@@ -131,6 +131,7 @@ async def collecting_data(post: list):
 
 
 def put_data_tobase(db: Database, post_id, data, comments, is_first_collecting: bool):
+
     # Put data into posts
     if is_first_collecting:
         query = 'UPDATE posts SET publication_date = %s, subscribers_count = %s WHERE post_id = %s'
@@ -148,7 +149,7 @@ def put_data_tobase(db: Database, post_id, data, comments, is_first_collecting: 
         if not is_first_collecting:
 
             # Load all previous comments from the base
-            query = 'SELECT comment_date FROM comments WHERE post_id = ?'
+            query = 'SELECT comment_date FROM comments WHERE post_id = %s'
             params = (post_id,)
             old_comments = db.select_query(query, params)
 
@@ -169,6 +170,7 @@ def put_data_tobase(db: Database, post_id, data, comments, is_first_collecting: 
                     comments_to_load.append(comm)
 
         else:
+            comments_to_load = []
             for comm in comments:
                 comm.insert(0, post_id)
                 comm.append('1')
@@ -199,21 +201,30 @@ def get_active_post_list(db: Database):
 
 async def main():
 
+    # Create database connection
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+
     # Get all active posts from the base
-    full_data = get_active_post_list()
+    full_data = get_active_post_list(db)
 
     for post in full_data:
         data, comments = await collecting_data(post)
         if not data:
             continue
-        put_data_tobase(post[0][0], data, comments, post[1])
+        put_data_tobase(db, post[0][0], data, comments, post[1])
 
 
 def main_main():
+    # First init
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    db.init_base()
+    del db
+
     def main_main_main():
-        with client:
-            client.loop.run_until_complete(main())
-    schedule.every(15).minutes.do(main_main_main)
+        with tg_client:
+            tg_client.loop.run_until_complete(main())
+        print('Done!')
+    schedule.every(15).seconds.do(main_main_main)
 
     while True:
         schedule.run_pending()

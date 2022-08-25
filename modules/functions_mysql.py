@@ -7,18 +7,6 @@ from telebot import types
 import config
 from classes.database import Database
 
-query_types = {'select_1': 'SELECT * FROM * WHERE * = ?',
-                   'select_2': 'SELECT *, * FROM * WHERE * = ?',
-                   'select_3': 'SELECT * FROM * WHERE * = ? AND * = ?',
-                   'select_4': 'SELECT *, * FROM * WHERE * = ? AND * = ?',
-                   'select_5': 'SELECT *, * FROM * LEFT JOIN * USING(*) GROUP BY * HAVING * > ?',
-                   'select_6': 'SELECT *, *, *, * FROM * WHERE * = ?',
-                   'select_7': 'SELECT *, *, * FROM * WHERE * = ? AND * = ?',
-                   'update_1': 'UPDATE * SET * = ? WHERE * = ?',
-                   'insert_1': 'INSERT INTO * (*, *) VALUES (?, ?)',
-                   'insert_2': 'INSERT INTO * (*, *, *, *, *) VALUES (?, ?, ?, ?, ?)',
-                   'delete_1': 'DELETE FROM * WHERE * = ?'}
-
 
 def check_client(db: Database, new_client: str):
     """Checks if new client is already in the base.
@@ -26,8 +14,8 @@ def check_client(db: Database, new_client: str):
     :return: is_in_base: flag if client is already in base;
     :return: client_id: id value if client is in base already, else False;
     """
-    query = 'SELECT client_id FROM clients WHERE client_name = %s'
-    params = (new_client.capitalize(),)
+    query = """SELECT client_id FROM clients WHERE client_name IN(%s)"""
+    params = (str(new_client.capitalize()),)
     result = db.select_query(query, params)
 
     is_in_base = False if len(result) == 0 else True
@@ -43,8 +31,8 @@ def add_client(db: Database, new_client: str):
     :return: is_added: flag if client added successfully;
     :return: client_id: id value of new client.
     """
-    query = 'INSERT INTO clients (client_name, is_archive) VALUES (?, ?)'
-    params = (new_client.capitalize(), 0)
+    query = 'INSERT INTO clients (client_name, is_archive) VALUES (%s, %s)'
+    params = (str(new_client.capitalize()), 0)
     db.update_query(query, params)
 
     query = 'SELECT client_id FROM clients WHERE client_name = %s'
@@ -55,8 +43,10 @@ def add_client(db: Database, new_client: str):
     return client_id
 
 
-def list_of_elements(db: Database, callback_case: str, client_id=None):
+def list_of_elements(callback_case: str, client_id=None):
     """Returns a list of elements."""
+
+    db = Database(config.host, config.port, config.user_name, config.user_password)
 
     is_archive = 1 if re.fullmatch(r'^.*archive.*$', callback_case) else 0
     if client_id is not None:
@@ -68,10 +58,12 @@ def list_of_elements(db: Database, callback_case: str, client_id=None):
         if is_archive == 0:
             query = 'SELECT client_id, client_name FROM clients WHERE is_archive = 0'
         else:
-            query = 'SELECT clients.client_id, clients.client_name' \
-                    'FROM clients LEFT JOIN posts USING(client_id)' \
-                    'GROUP BY clients.client_id HAVING posts.is_archive = 1'
+            query = 'SELECT clients.client_id, clients.client_name ' \
+                    'FROM clients LEFT JOIN posts ON clients.client_id = posts.client_id ' \
+                    'GROUP BY clients.client_id HAVING SUM(posts.is_archive) > 0'
         result = db.select_query(query)
+
+    del db
 
     if len(result) == 0:
         result = None
@@ -79,11 +71,12 @@ def list_of_elements(db: Database, callback_case: str, client_id=None):
     return result
 
 
-def post_info(db: Database, post_id: int):
+def post_info(post_id: int):
     """Takes post_id (unique number inside db) and returns dictionary with all detailed info about the post.
     :param: post_id: post id inside database;
     :return: post_info: a dictionary with all post information.
     """
+    db = Database(config.host, config.port, config.user_name, config.user_password)
 
     query = """SELECT channel_name, channel_post_id, post_name, publication_date, subscribers_count,
                     (SELECT views FROM stats WHERE post_id = %s ORDER BY views DESC LIMIT 1) as views,
@@ -96,12 +89,18 @@ def post_info(db: Database, post_id: int):
             """
     params = (post_id, post_id, post_id, post_id, post_id)
     result = db.select_query(query, params)
+    del db
 
     # Convert answer to dictionary
     result_keys = ['channel_name', 'channel_post_id', 'post_name', 'publication_date', 'subscribers_count',
                    'views', 'forwards', 'comments_all', 'comments_new']
     result_values = list(*result)
     result_dict = dict(zip(result_keys, result_values))
+
+    if result_dict['publication_date'] is not None:
+        pass
+    else:
+        result_dict = None
 
     return result_dict
 
@@ -199,13 +198,6 @@ def add_post(db: Database, file_link: str):
     params = (args['client_id'], args['channel_name'], args['channel_post_id'], args['post_name'], 0)
     db.update_query(query, params)
 
-    query = 'SELECT post_id FROM posts WHERE channel_name = %s AND channel_post_id = %s'
-    params = (args['channel_name'], args['channel_post_id'])
-    clients = db.select_query(query, params)
-    post_id = clients[0][0]
-
-    return post_id
-
 
 def track_status(post_id: int, to_archive: bool, db=None):
     """The procedure, returns the post into the active or archive state (depend on switch flag).
@@ -236,8 +228,9 @@ def track_status(post_id: int, to_archive: bool, db=None):
     db.update_query(query, params)
 
 
-def archive_client(db: Database, client_id: int):
+def archive_client(client_id: int):
     """Procedure, updates is_archive flag for the client and all its posts."""
+    db = Database(config.host, config.port, config.user_name, config.user_password)
 
     # Select all active posts of the client
     query = 'SELECT post_id FROM posts WHERE client_id IN(%s) AND is_archive = 0'
@@ -254,6 +247,8 @@ def archive_client(db: Database, client_id: int):
     # Update archive status for the client
     query = 'UPDATE clients SET is_archive = 1 WHERE client_id = %s'
     db.update_query(query, params)
+
+    del db
 
 
 def delete_post(db: Database, post_id: int):
@@ -294,26 +289,34 @@ def get_post_details(post_id):
     """
     post_inf = post_info(post_id)
 
-    publication_date = datetime.utcfromtimestamp(post_inf['publication_date']).strftime(config.date_format)
+    if post_inf is not None:
+        publication_date = datetime.utcfromtimestamp(post_inf['publication_date']).strftime(config.date_format)
 
-    post_info_message = f'Название поста: {post_inf["post_name"]}\n' \
-                        f'Канал: {post_inf["channel_name"]}\n' \
-                        f'Дата публикации: {publication_date}\n' \
-                        f'Подписчиков на момент публикации: {post_inf["subscribers_count"]}\n' \
-                        f'Просмотров: {post_inf["views"]}\n' \
-                        f'Репостов: {post_inf["forwards"]}\n' \
-                        f'Комментариев всего: {post_inf["comments_all"]}\n'
+        post_info_message = f'Название поста: {post_inf["post_name"]}\n' \
+                            f'Канал: {post_inf["channel_name"]}\n' \
+                            f'Дата публикации: {publication_date}\n' \
+                            f'Подписчиков на момент публикации: {post_inf["subscribers_count"]}\n' \
+                            f'Просмотров: {post_inf["views"]}\n' \
+                            f'Репостов: {post_inf["forwards"]}\n' \
+                            f'Комментариев всего: {post_inf["comments_all"]}\n'
 
-    post_link = f'https://t.me/{post_inf["channel_name"]}/{post_inf["channel_post_id"]}'
+        post_link = f'https://t.me/{post_inf["channel_name"]}/{post_inf["channel_post_id"]}'
+    else:
+        post_info_message = 'Для этого поста информация еще не собрана. ' \
+                            'Пожалуйста, подождите 15 минут и повторите запрос.'
+        post_link = None
 
     return post_info_message, post_link
 
 
-def list_of_user_ids(db: Database):
+def list_of_user_ids(db=None):
     """Procedure which returns actual white list of users."""
+    if db is None:
+        db = Database(config.host, config.port, config.user_name, config.user_password)
     query = 'SELECT user_name FROM users'
     raw_users = db.select_query(query)
     list_of_users = [int(user[0]) for user in raw_users]
+    del db
     return list_of_users
 
 
@@ -335,7 +338,7 @@ def get_new_comments(db: Database):
     query = 'SELECT post_id, client_name, post_name, COUNT(comment_id) ' \
             'FROM comments LEFT JOIN posts USING(post_id) LEFT JOIN clients USING(client_id) ' \
             'WHERE comments.is_new = 1 ' \
-            'GROUP BY client_name, post_name'
+            'GROUP BY client_name, post_name, post_id'
     raw_new_comments = db.select_query(query)
 
     have_updates = False if raw_new_comments == [] else True
@@ -363,19 +366,24 @@ def compose_notification_message(raw_new_comments):
 
 
 def prepare_comments():
-    raw_comments, have_updates = get_new_comments()
+
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    raw_comments, have_updates = get_new_comments(db)
     if have_updates:
         notification_message = compose_notification_message(raw_comments)
-        list_of_users = list_of_user_ids()
+        list_of_users = list_of_user_ids(db)
         list_of_buttons = types.InlineKeyboardMarkup()
         for post in raw_comments:
             button = types.InlineKeyboardButton(text=f'{post[1]} - {post[2]}',
                                                 callback_data=f'give_comments_list_1_{post[0]}')
             list_of_buttons.add(button)
+        flag = True
 
-        return True, list_of_users, notification_message, list_of_buttons
     else:
-        return False, False, False, False
+        flag, list_of_users, notification_message, list_of_buttons = False, False, False, False
+
+    del db
+    return flag, list_of_users, notification_message, list_of_buttons
 
 
 def delete_is_new_flags(db: Database, post_id):

@@ -10,7 +10,7 @@ import telebot
 from telebot import types
 
 import config
-from modules import functions as f, messages
+from modules import functions_mysql as f, messages
 from classes.database import Database
 
 bot = telebot.TeleBot(config.bot_token)
@@ -171,16 +171,20 @@ def select_active_post(call):
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
     post_info = f.get_post_details(post_id)
-    # TODO: add a query to delete is_new flags if there was a click on post link
-    list_of_buttons = types.InlineKeyboardMarkup()
-    watch_comments_button = types.InlineKeyboardButton(text=messages.watch_comments,
-                                                       callback_data=f'give_comments_list_0_{post_id}')
-    go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
-                                                   url=post_info[1])
-    archive_post_button = types.InlineKeyboardButton(text=messages.archive_post,
-                                                     callback_data=f'archive_post_{post_id}')
-    list_of_buttons.add(watch_comments_button, go_to_post_button, archive_post_button)
-    bot.send_message(call.from_user.id, post_info[0], reply_markup=list_of_buttons)
+
+    if post_info[1] is not None:
+        list_of_buttons = types.InlineKeyboardMarkup()
+        watch_comments_button = types.InlineKeyboardButton(text=messages.watch_comments,
+                                                           callback_data=f'give_comments_list_0_{post_id}')
+        go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
+                                                       url=post_info[1])
+        archive_post_button = types.InlineKeyboardButton(text=messages.archive_post,
+                                                         callback_data=f'archive_post_{post_id}')
+        list_of_buttons.add(watch_comments_button, go_to_post_button, archive_post_button)
+        bot.send_message(call.from_user.id, post_info[0], reply_markup=list_of_buttons)
+
+    else:
+        bot.send_message(call.from_user.id, post_info[0])
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^give_comments_list_.*', call.data))
@@ -189,10 +193,11 @@ def give_comments_list(call):
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
     need_only_new = int(call.data.split('_')[-2])
-    comments_info = f.comment_info(post_id, need_only_new)
+
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    comments_info = f.comment_info(db, post_id, need_only_new)
     if need_only_new == 1:
-        f.delete_is_new_flags(post_id)
-    # TODO: add a query to delete is_new flags if comments are seen
+        f.delete_is_new_flags(db, post_id)
     if comments_info is not None:
         list_of_buttons = types.InlineKeyboardMarkup()
         go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
@@ -201,6 +206,7 @@ def give_comments_list(call):
         bot.send_message(call.from_user.id, comments_info[0], reply_markup=list_of_buttons)
     else:
         bot.send_message(call.from_user.id, messages.no_comments_yet)
+    del db
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'add_new_client')
@@ -345,9 +351,11 @@ def finish_post_add(message):
             csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
             csv_writer.writerow([channel_name, channel_post_id])
 
-        is_in_base = f.check_post(config.post_info_temp_name)
+        db = Database(config.host, config.port, config.user_name, config.user_password)
+
+        is_in_base = f.check_post(db, config.post_info_temp_name)
         if not is_in_base[0]:
-            post_added = f.add_post(config.post_info_temp_name)
+            f.add_post(db, config.post_info_temp_name)
             os.remove(config.post_info_temp_name)
             bot.send_message(message.chat.id, messages.success_add_post_first_time)
         else:
@@ -358,6 +366,9 @@ def finish_post_add(message):
                                                    callback_data='exit')
             list_of_buttons.add(yes_button, no_button)
             bot.send_message(message.chat.id, messages.post_already_exists, reply_markup=list_of_buttons)
+
+        del db
+
     else:
         msg = bot.send_message(message.chat.id, messages.ask_post_link_second_time)
         bot.register_next_step_handler(msg, finish_post_add)
@@ -374,16 +385,18 @@ def process_new_client(message):
 
     client_name = message.text
 
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+
     # Check if client is already in base
-    in_base = f.check_client(client_name)
+    in_base = f.check_client(db, client_name)
 
     # Add new client and propose to add a post for this client
     if not in_base[0]:
-        client_added = f.add_client(client_name)
+        client_added = f.add_client(db, client_name)
 
         list_of_buttons = types.InlineKeyboardMarkup()
         add_post_button = types.InlineKeyboardButton(text=messages.add_post,
-                                                     callback_data=f'post_add_{client_added[1]}')
+                                                     callback_data=f'post_add_{client_added}')
         nothing_button = types.InlineKeyboardButton(text=messages.nothing,
                                                     callback_data='exit')
         list_of_buttons.add(add_post_button, nothing_button)
@@ -400,6 +413,8 @@ def process_new_client(message):
                                                     callback_data='exit')
         list_of_buttons.add(add_post_button, add_another_client_button, nothing_button)
         bot.send_message(message.chat.id, messages.client_already_exists, reply_markup=list_of_buttons)
+
+    del db
 
 
 @bot.message_handler(content_types=['text'])
@@ -423,15 +438,14 @@ def delete_post(message):
 
 def main():
     # Base init
-    # TODO: add base init with config as default or different
     db = Database(config.host, config.port, config.user_name, config.user_password)
     db.init_base()
-
-    # TODO: think about base open and closing not to keep connection too long
+    db.add_user(218229736)
+    del db
 
     # Bot working
     bot.polling()
 
 
 if __name__ == '__main__':
-    pass
+    main()

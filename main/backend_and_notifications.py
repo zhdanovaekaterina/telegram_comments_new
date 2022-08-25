@@ -2,34 +2,35 @@
 # This module does all dirty work for the program.
 import json
 import re
-import sqlite3 as sl
 import time as t
 from datetime import datetime
 
 import requests
 import telethon
 import schedule
-import pprint
+import telebot
 from bs4 import BeautifulSoup
 from telethon import client
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 
 import config
-from modules import functions as f
+from modules import functions_mysql as f
+from classes.database import Database
 
-client = TelegramClient(config.username, config.api_id, config.api_hash)
-client.start()
+
+tg_client = TelegramClient(config.username, config.api_id, config.api_hash)
+tg_client.start()
 
 
 async def dump_comments(channel, post_id):
     # Error processing if channel comments turned off
     try:
         all_messages = []
-        async for message in client.iter_messages(channel, reply_to=post_id, reverse=True):
+        async for message in tg_client.iter_messages(channel, reply_to=post_id, reverse=True):
             if isinstance(message.sender, telethon.tl.types.User):
                 mess_date = message.date.timestamp()
-                message_text = message.text[:50] + '...' if len(message.text) > 50 else message.text
+                message_text = message.text[:45] + '...' if len(message.text) > 45 else message.text
                 new_rec = [mess_date, message.sender.username, message.sender.first_name, message_text]
             else:
                 new_rec = None
@@ -56,7 +57,7 @@ async def dump_post_info(channel, post_id):
                 return list(o)
             return json.JSONEncoder.default(self, o)
 
-    history = await client(GetHistoryRequest(
+    history = await tg_client(GetHistoryRequest(
         peer=channel,
         offset_id=(post_id + 1),
         offset_date=None,
@@ -71,7 +72,6 @@ async def dump_post_info(channel, post_id):
 
     # Check if the ID received match the ID asked
     if all_messages[0]['id'] != post_id:
-        print('Post deleted or doensn\'t exist')
         all_data = False
     else:
         publication_date = all_messages[0]['date']
@@ -114,7 +114,7 @@ async def collecting_data(post: list):
 
     # Create channel link and channel object
     channel_link = f'https://t.me/{post[0][1]}'
-    channel = await client.get_entity(channel_link)
+    channel = await tg_client.get_entity(channel_link)
     channel_post_id = post[0][2]
 
     # Dump comments
@@ -122,47 +122,44 @@ async def collecting_data(post: list):
 
     # Dump post info
     all_data = await dump_post_info(channel, channel_post_id)
+    if not all_data:
+        f.track_status(post[0], True)
+
     if post[1]:
         all_data['subscribers_count'] = dump_subscribers_count(post[0][1])
 
     return all_data, all_comments
 
 
-def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
-    # Open connection
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
+def put_data_tobase(db: Database, post_id, data, comments, is_first_collecting: bool):
 
     # Put data into posts
     if is_first_collecting:
-        query = 'UPDATE posts SET publication_date = ?, subscribers_count = ? WHERE post_id = ?'
-        parametrs = (data['publication_date'], data['subscribers_count'], post_id)
-        cursor.execute(query, parametrs)
+        query = 'UPDATE posts SET publication_date = %s, subscribers_count = %s WHERE post_id = %s'
+        params = (data['publication_date'], data['subscribers_count'], post_id)
+        db.update_query(query, params)
 
     # Put data into stats
     date_now = datetime.now().timestamp()
-    query = 'INSERT INTO stats (post_id, date, views, forwards) VALUES (?, ?, ?, ?)'
-    parametrs = (post_id, date_now, data['views'], data['forwards'])
-    cursor.execute(query, parametrs)
+    query = 'INSERT INTO stats (post_id, date, views, forwards) VALUES (%s, %s, %s, %s)'
+    params = (post_id, date_now, data['views'], data['forwards'])
+    db.update_query(query, params)
 
     if comments is not None:
         comments_to_load = []
         if not is_first_collecting:
 
             # Load all previous comments from the base
-            query = 'SELECT comment_date FROM comments WHERE post_id = ?'
-            parametrs = (post_id,)
-            cursor.execute(query, parametrs)
-            old_comments = cursor.fetchall()
+            query = 'SELECT comment_date FROM comments WHERE post_id = %s'
+            params = (post_id,)
+            old_comments = db.select_query(query, params)
 
             # Compare old and new comment sets
             old_comments_1 = set()
-            for comm in old_comments:
-                old_comments_1.add(comm[0])
+            [old_comments_1.add(comm[0]) for comm in old_comments]
 
             new_comments = set()
-            for comm in comments:
-                new_comments.add(comm[0])
+            [new_comments.add(comm[0]) for comm in comments]
             diff_set = new_comments - old_comments_1
 
             # Update list of comments to load
@@ -174,6 +171,7 @@ def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
                     comments_to_load.append(comm)
 
         else:
+            comments_to_load = []
             for comm in comments:
                 comm.insert(0, post_id)
                 comm.append('1')
@@ -182,20 +180,14 @@ def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
 
         # Put comments into comments
         query = 'INSERT INTO comments (post_id, comment_date, author_username, author, comment_text, is_new) ' \
-                'VALUES (?, ?, ?, ?, ?, ?)'
-        cursor.executemany(query, comments_to_load)
-
-    # Commit and close connection
-    con.commit()
-    con.close()
+                'VALUES (%s, %s, %s, %s, %s, %s)'
+        db.update_many_query(query, comments_to_load)
 
 
-def get_active_post_list():
+def get_active_post_list(db: Database):
     # Get post attributes from the base
-    query_case = 'select_6'
-    elements = ['post_id', 'channel_name', 'channel_post_id', 'publication_date', 'posts', 'is_archive']
-    parametrs = (0,)
-    post_info = f.query_constructor(query_case, elements, parametrs)
+    query = 'SELECT post_id, channel_name, channel_post_id, publication_date FROM posts WHERE is_archive = 0'
+    post_info = db.select_query(query)
 
     full_data = []
     for post in post_info:
@@ -208,24 +200,48 @@ def get_active_post_list():
     return full_data
 
 
-async def main():
+def send_comments(bot):
+    flag, list_of_users, notification_message, list_of_buttons = f.prepare_comments()
+    if flag:
+        for user in list_of_users:
+            bot.send_message(user, notification_message, reply_markup=list_of_buttons)
+        else:
+            print('There are no new comments.')
 
-    print('Started working...')
+
+async def main(bot):
+    # Create database connection
+    db = Database(config.host, config.port, config.user_name, config.user_password)
 
     # Get all active posts from the base
-    full_data = get_active_post_list()
+    full_data = get_active_post_list(db)
 
     for post in full_data:
         data, comments = await collecting_data(post)
-        put_data_tobase(post[0][0], data, comments, post[1])
+        if not data:
+            continue
+        put_data_tobase(db, post[0][0], data, comments, post[1])
 
-    print('Done!')
+    send_comments(bot)
+
+    # Close database connection
+    del db
 
 
 def main_main():
+    # First init
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    db.init_base()
+    del db
+
     def main_main_main():
-        with client:
-            client.loop.run_until_complete(main())
+        # Create bot connection
+        bot = telebot.TeleBot(config.bot_token)
+        bot.delete_webhook()
+
+        # Loop working
+        with tg_client:
+            tg_client.loop.run_until_complete(main(bot))
     schedule.every(5).seconds.do(main_main_main)
 
     while True:
