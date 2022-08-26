@@ -8,4 +8,4 @@ test_functions.py
 *.session
 *.json
 debbuging.py
-dockerfile
+*.dockerfile

@@ -1,4 +1,3 @@
-import sqlite3 as sl
 import re
 import csv
 from datetime import datetime
@@ -6,122 +5,18 @@ from datetime import datetime
 from telebot import types
 
 import config
+from classes.database import Database
 
 
-def init_base():
-    """Creates workbase structure, if it doesn't exist yet."""
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
-
-    # Enable foreign keys
-    cursor.execute("""PRAGMA foreign_keys=on""")
-
-    # Create table 'users'
-    cursor.execute("""CREATE TABLE IF NOT EXISTS users
-                      (user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       user_name INTEGER)
-                   """)
-
-    # Create table 'clients'
-    cursor.execute("""CREATE TABLE IF NOT EXISTS clients
-                      (client_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       client_name TEXT,
-                       is_archive INTEGER)
-                   """)
-
-    # Create table 'posts'
-    cursor.execute("""CREATE TABLE IF NOT EXISTS posts (
-                    post_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    client_id INTEGER,
-                    channel_name TEXT,
-                    channel_post_id INTEGER,
-                    post_name TEXT,
-                    publication_date INTEGER,
-                    subscribers_count INTEGER,
-                    is_archive INTEGER,
-                    CONSTRAINT posts_FK FOREIGN KEY (client_id) REFERENCES clients(client_id)
-                    );
-                   """)
-
-    # Create table 'stats'
-    cursor.execute("""CREATE TABLE IF NOT EXISTS stats
-                      (stat_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       post_id INTEGER,
-                       date INTEGER,
-                       views INTEGER,
-                       forwards INTEGER,
-                       CONSTRAINT stats_FK FOREIGN KEY (post_id) REFERENCES posts(post_id)
-                       );
-                   """)
-
-    # Create table 'comments'
-    cursor.execute("""CREATE TABLE IF NOT EXISTS comments
-                      (comment_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                       post_id INTEGER,
-                       comment_date INTEGER,
-                       author_username TEXT,
-                       author TEXT,
-                       comment_text TEXT,
-                       is_new INTEGER,
-                       CONSTRAINT comments_FK FOREIGN KEY (post_id) REFERENCES posts(post_id)
-                       );
-                   """)
-
-    # Put developer's id into the base
-    query = 'INSERT INTO users (user_name) VALUES (?)'
-    values = (config.developer_id,)
-    cursor.execute(query, values)
-
-    con.commit()
-    con.close()
-
-
-def query_constructor(query_type: str, elements: list, parametrs: tuple):
-    """Query constructor."""
-
-    # * = query construct elements; ? = params
-    query_types = {'select_1': 'SELECT * FROM * WHERE * = ?',
-                   'select_2': 'SELECT *, * FROM * WHERE * = ?',
-                   'select_3': 'SELECT * FROM * WHERE * = ? AND * = ?',
-                   'select_4': 'SELECT *, * FROM * WHERE * = ? AND * = ?',
-                   'select_5': 'SELECT *, * FROM * LEFT JOIN * USING(*) GROUP BY * HAVING * > ?',
-                   'select_6': 'SELECT *, *, *, * FROM * WHERE * = ?',
-                   'select_7': 'SELECT *, *, * FROM * WHERE * = ? AND * = ?',
-                   'update_1': 'UPDATE * SET * = ? WHERE * = ?',
-                   'insert_1': 'INSERT INTO * (*, *) VALUES (?, ?)',
-                   'insert_2': 'INSERT INTO * (*, *, *, *, *) VALUES (?, ?, ?, ?, ?)',
-                   'delete_1': 'DELETE FROM * WHERE * = ?'}
-
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
-
-    query = query_types[query_type]
-
-    for el in elements:
-        query = re.sub(r'\*', el, query, count=1)
-
-    cursor.execute(query, parametrs)
-
-    if re.fullmatch(r'^select.*', query_type):
-        result = cursor.fetchall()
-    else:
-        result = True
-        con.commit()
-
-    con.close()
-    return result
-
-
-def check_client(new_client: str):
+def check_client(db: Database, new_client: str):
     """Checks if new client is already in the base.
     :param: new_client: name of new client, letter case doesn't matter;
     :return: is_in_base: flag if client is already in base;
     :return: client_id: id value if client is in base already, else False;
     """
-    query_case = 'select_1'
-    elements = ['client_id', 'clients', 'client_name']
-    parametrs = (new_client.capitalize(),)
-    result = query_constructor(query_case, elements, parametrs)
+    query = """SELECT client_id FROM clients WHERE client_name IN(%s)"""
+    params = (str(new_client.capitalize()),)
+    result = db.select_query(query, params)
 
     is_in_base = False if len(result) == 0 else True
     client_id = result[0][0] if is_in_base else False
@@ -129,47 +24,46 @@ def check_client(new_client: str):
     return is_in_base, client_id
 
 
-def add_client(new_client: str):
+# TODO: check add_client calls and remove is_added argument (result[0])
+def add_client(db: Database, new_client: str):
     """Adds new client to the base.
     :param new_client: name of new client, letter case doesn't matter - will be capitalized;
     :return: is_added: flag if client added successfully;
     :return: client_id: id value of new client.
     """
-    query_case = 'insert_1'
-    elements = ['clients', 'client_name', 'is_archive']
-    parametrs = (new_client.capitalize(), 0)
-    is_added = query_constructor(query_case, elements, parametrs)
+    query = 'INSERT INTO clients (client_name, is_archive) VALUES (%s, %s)'
+    params = (str(new_client.capitalize()), 0)
+    db.update_query(query, params)
 
-    query_case = 'select_1'
-    elements = ['client_id', 'clients', 'client_name']
-    parametrs = (new_client.capitalize(),)
-    result = query_constructor(query_case, elements, parametrs)
+    query = 'SELECT client_id FROM clients WHERE client_name = %s'
+    params = (new_client.capitalize(),)
+    result = db.select_query(query, params)
     client_id = result[0][0]
 
-    return is_added, client_id
+    return client_id
 
 
 def list_of_elements(callback_case: str, client_id=None):
     """Returns a list of elements."""
 
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+
     is_archive = 1 if re.fullmatch(r'^.*archive.*$', callback_case) else 0
     if client_id is not None:
-        query_case = 'select_4'
-        elements = ['post_id', 'post_name', 'posts', 'is_archive', 'client_id']
-        parametrs = (is_archive, client_id)
-        result = query_constructor(query_case, elements, parametrs)
+        query = 'SELECT post_id, post_name FROM posts WHERE is_archive = %s AND client_id = %s'
+        params = (is_archive, client_id)
+        result = db.select_query(query, params)
     else:
+        # TODO: check if is_archive condition returns correct result
         if is_archive == 0:
-            query_case = 'select_2'
-            elements = ['client_id', 'client_name', 'clients', 'is_archive']
-            parametrs = (is_archive,)
-            result = query_constructor(query_case, elements, parametrs)
+            query = 'SELECT client_id, client_name FROM clients WHERE is_archive = 0'
         else:
-            query_case = 'select_5'
-            elements = ['clients.client_id', 'clients.client_name', 'clients', 'posts', 'client_id',
-                        'clients.client_id', 'posts.is_archive']
-            parametrs = (0,)
-            result = query_constructor(query_case, elements, parametrs)
+            query = 'SELECT clients.client_id, clients.client_name ' \
+                    'FROM clients LEFT JOIN posts ON clients.client_id = posts.client_id ' \
+                    'GROUP BY clients.client_id HAVING SUM(posts.is_archive) > 0'
+        result = db.select_query(query)
+
+    del db
 
     if len(result) == 0:
         result = None
@@ -182,23 +76,20 @@ def post_info(post_id: int):
     :param: post_id: post id inside database;
     :return: post_info: a dictionary with all post information.
     """
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
+    db = Database(config.host, config.port, config.user_name, config.user_password)
 
     query = """SELECT channel_name, channel_post_id, post_name, publication_date, subscribers_count,
-                    (SELECT views FROM stats WHERE post_id = ? ORDER BY views DESC LIMIT 1) as views,
-                    (SELECT forwards FROM stats WHERE post_id = ? ORDER BY forwards DESC LIMIT 1) as forwards,
-                    (SELECT COUNT(comment_id) FROM comments WHERE post_id = ? GROUP BY post_id) as comments_all,
-                    (SELECT COUNT(comment_id) FROM comments WHERE post_id = ? AND is_new = 1 GROUP BY post_id)
+                    (SELECT views FROM stats WHERE post_id = %s ORDER BY views DESC LIMIT 1) as views,
+                    (SELECT forwards FROM stats WHERE post_id = %s ORDER BY forwards DESC LIMIT 1) as forwards,
+                    (SELECT COUNT(comment_id) FROM comments WHERE post_id = %s GROUP BY post_id) as comments_all,
+                    (SELECT COUNT(comment_id) FROM comments WHERE post_id = %s AND is_new = 1 GROUP BY post_id)
                         as comments_new
             FROM posts
-            WHERE post_id = ?
+            WHERE post_id = %s
             """
     params = (post_id, post_id, post_id, post_id, post_id)
-
-    cursor.execute(query, params)
-    result = cursor.fetchall()
-    con.close()
+    result = db.select_query(query, params)
+    del db
 
     # Convert answer to dictionary
     result_keys = ['channel_name', 'channel_post_id', 'post_name', 'publication_date', 'subscribers_count',
@@ -206,10 +97,15 @@ def post_info(post_id: int):
     result_values = list(*result)
     result_dict = dict(zip(result_keys, result_values))
 
+    if result_dict['publication_date'] is not None:
+        pass
+    else:
+        result_dict = None
+
     return result_dict
 
 
-def comment_info(post_id: int, need_only_new=0):
+def comment_info(db: Database, post_id: int, need_only_new=0):
     """Takes post_id (unique number inside db) and returns its comments. Also returns post link.
     :param: post_id: post id inside database;
     :return: comments_info_message: message with date, author and text for each comment;
@@ -217,25 +113,21 @@ def comment_info(post_id: int, need_only_new=0):
     """
     result = []
 
-    parametrs_1 = (post_id,)
-    query_case_1 = 'select_2'
-    elements_1 = ['channel_name', 'channel_post_id', 'posts', 'post_id']
-    post_info = query_constructor(query_case_1, elements_1, parametrs_1)
+    query = 'SELECT channel_name, channel_post_id FROM posts WHERE post_id = %s'
+    params = (post_id,)
+    post_info = db.select_query(query, params)
 
     if len(post_info) == 0:
         return None
 
     if need_only_new == 1:
-        parametrs_2 = (post_id, 1)
-        query_case_2 = 'select_7'
-        elements_2 = ['comment_date', 'author', 'comment_text', 'comments', 'post_id', 'is_new']
-        comments_info = query_constructor(query_case_2, elements_2, parametrs_2)
+        query = 'SELECT comment_date, author, comment_text FROM comments WHERE post_id = %s AND is_new = %s'
+        params = (post_id, 1)
     else:
-        parametrs_3 = (post_id,)
-        query_case_3 = 'select_6'
-        elements_3 = ['comment_date', 'author', 'comment_text', 'is_new', 'comments', 'post_id']
-        comments_info = query_constructor(query_case_3, elements_3, parametrs_3)
+        query = 'SELECT comment_date, author, comment_text, is_new FROM comments WHERE post_id = %s'
+        params = (post_id,)
 
+    comments_info = db.select_query(query, params)
     if len(comments_info) == 0:
         return None
 
@@ -275,17 +167,16 @@ def read_arguments(file_link: str):
     return post_arguments
 
 
-def check_post(file_link: str):
+def check_post(db: Database, file_link: str):
     """Checks if new post is already in the base.
     :param: file_link: name of the file which has all arguments;
     :return: is_in_base: flag if client is already in base;
     :return: client_id: returns if client value is in base already, else False;
     """
-    query_case = 'select_3'
-    elements = ['post_id', 'posts', 'channel_name', 'channel_post_id']
+    query = 'SELECT post_id FROM posts WHERE channel_name = %s AND channel_post_id = %s'
     post_arguments = read_arguments(file_link)
-    parametrs = (post_arguments['channel_name'], post_arguments['channel_post_id'])
-    posts = query_constructor(query_case, elements, parametrs)
+    params = (post_arguments['channel_name'], post_arguments['channel_post_id'])
+    posts = db.select_query(query, params)
 
     is_in_base = False if len(posts) == 0 else True
     post_id = posts[0][0] if is_in_base else False
@@ -293,100 +184,80 @@ def check_post(file_link: str):
     return is_in_base, post_id
 
 
-def add_post(file_link: str):
+# TODO: check add_client calls and remove is_added argument (result[0])
+def add_post(db: Database, file_link: str):
     """Adds new client to the base.
     :param file_link: name of the file which has all arguments;
     :return: is_added: flag if client added successfully;
     :return: post_id: id value of new client.
     """
-    query_case = 'insert_2'
-    elements = ['posts', 'client_id', 'channel_name', 'channel_post_id', 'post_name', 'is_archive']
-    post_arguments = read_arguments(file_link)
-    parametrs = (post_arguments['client_id'], post_arguments['channel_name'], post_arguments['channel_post_id'],
-                 post_arguments['post_name'], 0)
-    is_added = query_constructor(query_case, elements, parametrs)
+    args = read_arguments(file_link)
 
-    query_case = 'select_3'
-    elements = ['post_id', 'posts', 'channel_name', 'channel_post_id']
-    post_arguments = read_arguments(file_link)
-    parametrs = (post_arguments['channel_name'], post_arguments['channel_post_id'])
-    clients = query_constructor(query_case, elements, parametrs)
-    post_id = clients[0][0]
-
-    return is_added, post_id
+    query = 'INSERT INTO posts (client_id, channel_name, channel_post_id, post_name, is_archive)' \
+            'VALUES (%s, %s, %s, %s, %s)'
+    params = (args['client_id'], args['channel_name'], args['channel_post_id'], args['post_name'], 0)
+    db.update_query(query, params)
 
 
-def track_status(post_id: int, to_archive: bool):
+def track_status(post_id: int, to_archive: bool, db=None):
     """The procedure, returns the post into the active or archive state (depend on switch flag).
     Checks if it was the last client's post and returns client to active or archive state if so as well."""
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
-
     to_archive = 1 if to_archive else 0
+    if db is None:
+        db = Database(config.host, config.port, config.user_name, config.user_password)
 
-    values_0 = (post_id,)
-    query_0 = """SELECT client_id FROM posts WHERE post_id = ?"""
-    cursor.execute(query_0, values_0)
-    client_id = cursor.fetchall()
+    query = 'SELECT client_id FROM posts WHERE post_id = %s'
+    params = (post_id,)
+    client_id = db.select_query(query, params)
 
     # Update archive status of the post
-    values_1 = (to_archive, post_id)
-    query_1 = """UPDATE posts SET is_archive = ? WHERE post_id = ?"""
-    cursor.execute(query_1, values_1)
+    query = 'UPDATE posts SET is_archive = %s WHERE post_id = %s'
+    params = (to_archive, post_id)
+    db.update_query(query, params)
 
     # Check if client have another archived posts
-    values_2 = (client_id[0][0],)
-    query_2 = """SELECT SUM(is_archive), COUNT(post_id) FROM posts WHERE client_id = ?"""
-    cursor.execute(query_2, values_2)
-    client_archive_posts = cursor.fetchall()
+    query = 'SELECT SUM(is_archive), COUNT(post_id) FROM posts WHERE client_id = %s'
+    params = (client_id[0][0],)
+    client_archive_posts = db.select_query(query, params)
 
     is_archive_client = 1 if client_archive_posts[0][0] == client_archive_posts[0][1] else 0
 
     # Update archive status of the client
-    values_3 = (is_archive_client, client_id[0][0],)
-    query_3 = """UPDATE clients SET is_archive = ? WHERE client_id = ?"""
-    cursor.execute(query_3, values_3)
-
-    # TODO: add flag if removed successfully, else - info message
-    con.commit()
-    con.close()
+    query = 'UPDATE clients SET is_archive = %s WHERE client_id = %s'
+    params = (is_archive_client, client_id[0][0],)
+    db.update_query(query, params)
 
 
 def archive_client(client_id: int):
     """Procedure, updates is_archive flag for the client and all its posts."""
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
+    db = Database(config.host, config.port, config.user_name, config.user_password)
 
     # Select all active posts of the client
-    values_1 = (client_id,)
-    query_1 = """SELECT post_id FROM posts WHERE client_id IN(?) AND is_archive = 0"""
-    cursor.execute(query_1, values_1)
-    clients_active_posts = cursor.fetchall()
+    query = 'SELECT post_id FROM posts WHERE client_id IN(%s) AND is_archive = 0'
+    params = (client_id,)
+    clients_active_posts = db.select_query(query, params)
     clients_active_posts = [val[0] for val in clients_active_posts]
 
     # Update archive status for all active posts of the client
     for post in clients_active_posts:
-        values_2 = (post,)
-        query_2 = """UPDATE posts SET is_archive = 1 WHERE post_id = ?"""
-        cursor.execute(query_2, values_2)
+        query = 'UPDATE posts SET is_archive = 1 WHERE post_id = %s'
+        params_1 = (post,)
+        db.update_query(query, params_1)
 
     # Update archive status for the client
-    query_3 = """UPDATE clients SET is_archive = 1 WHERE client_id = ?"""
-    cursor.execute(query_3, values_1)
+    query = 'UPDATE clients SET is_archive = 1 WHERE client_id = %s'
+    db.update_query(query, params)
 
-    con.commit()
-    con.close()
+    del db
 
 
-def delete_post(post_id: int):
+def delete_post(db: Database, post_id: int):
     """Procedure, finally deletes the post from base.
     :param: post_id: unique id of post inside the base.
     """
-
-    query_case = 'delete_1'
-    elements = ['posts', 'post_id']
-    parametrs = (post_id,)
-    query_constructor(query_case, elements, parametrs)
+    query = 'DELETE FROM posts WHERE post_id = %s'
+    params = (post_id,)
+    db.update_query(query, params)
 
 
 def generate_buttons_list(callback_case: str, client_id=None):
@@ -418,43 +289,35 @@ def get_post_details(post_id):
     """
     post_inf = post_info(post_id)
 
-    publication_date = datetime.utcfromtimestamp(post_inf['publication_date']).strftime(config.date_format)
+    if post_inf is not None:
+        publication_date = datetime.utcfromtimestamp(post_inf['publication_date']).strftime(config.date_format)
 
-    post_info_message = f'Название поста: {post_inf["post_name"]}\n' \
-                        f'Канал: {post_inf["channel_name"]}\n' \
-                        f'Дата публикации: {publication_date}\n' \
-                        f'Подписчиков на момент публикации: {post_inf["subscribers_count"]}\n' \
-                        f'Просмотров: {post_inf["views"]}\n' \
-                        f'Репостов: {post_inf["forwards"]}\n' \
-                        f'Комментариев всего: {post_inf["comments_all"]}\n'
+        post_info_message = f'Название поста: {post_inf["post_name"]}\n' \
+                            f'Канал: {post_inf["channel_name"]}\n' \
+                            f'Дата публикации: {publication_date}\n' \
+                            f'Подписчиков на момент публикации: {post_inf["subscribers_count"]}\n' \
+                            f'Просмотров: {post_inf["views"]}\n' \
+                            f'Репостов: {post_inf["forwards"]}\n' \
+                            f'Комментариев всего: {post_inf["comments_all"]}\n'
 
-    post_link = f'https://t.me/{post_inf["channel_name"]}/{post_inf["channel_post_id"]}'
+        post_link = f'https://t.me/{post_inf["channel_name"]}/{post_inf["channel_post_id"]}'
+    else:
+        post_info_message = 'Для этого поста информация еще не собрана. ' \
+                            'Пожалуйста, подождите 15 минут и повторите запрос.'
+        post_link = None
 
     return post_info_message, post_link
 
 
-def list_of_user_ids():
+def list_of_user_ids(db=None):
     """Procedure which returns actual white list of users."""
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
-    cursor.execute('SELECT user_name FROM users')
-    raw_users = cursor.fetchall()
-    con.close()
-
+    if db is None:
+        db = Database(config.host, config.port, config.user_name, config.user_password)
+    query = 'SELECT user_name FROM users'
+    raw_users = db.select_query(query)
     list_of_users = [int(user[0]) for user in raw_users]
+    del db
     return list_of_users
-
-
-def add_user(values):
-    """Procedure which adds user to white list."""
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
-
-    query = 'INSERT INTO users (user_name) VALUES (?)'
-
-    cursor.executemany(query, values)
-    con.commit()
-    con.close()
 
 
 def your_user_id(user_id):
@@ -462,20 +325,15 @@ def your_user_id(user_id):
     return message
 
 
-def get_new_comments():
+def get_new_comments(db: Database):
     """Connect the base and get the list of new comments.
     Returns info message and list of post ids where there are some updates."""
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
 
     query = 'SELECT post_id, client_name, post_name, COUNT(comment_id) ' \
             'FROM comments LEFT JOIN posts USING(post_id) LEFT JOIN clients USING(client_id) ' \
             'WHERE comments.is_new = 1 ' \
-            'GROUP BY client_name, post_name'
-
-    cursor.execute(query)
-    raw_new_comments = cursor.fetchall()
-    con.close()
+            'GROUP BY client_name, post_name, post_id'
+    raw_new_comments = db.select_query(query)
 
     have_updates = False if raw_new_comments == [] else True
     return raw_new_comments, have_updates
@@ -502,41 +360,40 @@ def compose_notification_message(raw_new_comments):
 
 
 def prepare_comments():
-    raw_comments, have_updates = get_new_comments()
+
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    raw_comments, have_updates = get_new_comments(db)
     if have_updates:
         notification_message = compose_notification_message(raw_comments)
-        list_of_users = list_of_user_ids()
+        list_of_users = list_of_user_ids(db)
         list_of_buttons = types.InlineKeyboardMarkup()
         for post in raw_comments:
             button = types.InlineKeyboardButton(text=f'{post[1]} - {post[2]}',
                                                 callback_data=f'give_comments_list_1_{post[0]}')
             list_of_buttons.add(button)
+        flag = True
 
-        return True, list_of_users, notification_message, list_of_buttons
     else:
-        return False, False, False, False
+        flag, list_of_users, notification_message, list_of_buttons = False, False, False, False
+
+    del db
+    return flag, list_of_users, notification_message, list_of_buttons
 
 
-def delete_is_new_flags(post_id):
+def delete_is_new_flags(db: Database, post_id):
     """Takes list of post_id's and mark all its comments as read."""
-    query_type = 'update_1'
-    elements = ['comments', 'is_new', 'post_id']
-    parametrs = (0, post_id)
-    query_constructor(query_type, elements, parametrs)
+    query = 'UPDATE comments SET is_new = %s WHERE post_id = %s'
+    params = (0, post_id)
+    db.update_query(query, params)
 
 
 def delete_all_users():
     """Delete all users from the white list."""
-    con = sl.connect(config.workbase_name)
-    cursor = con.cursor()
-    cursor.execute('DELETE FROM users')
-    cursor.execute('REINDEX users')
-    con.commit()
-    con.close()
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    query = 'DELETE FROM users'
+    db.update_query(query)
+    del db
 
 
 if __name__ == '__main__':
-    # raw_comments, have_updates, post_ids = get_new_comments()
-    # notification_message = compose_notification_message(raw_comments, have_updates)
-    # print(notification_message, post_ids)
-    pass
+    db = Database(config.host, config.port, config.user_name, config.user_password)

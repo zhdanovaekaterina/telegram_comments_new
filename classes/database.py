@@ -96,7 +96,11 @@ class Database:
                            """)
 
     def add_user(self, user_name):
-        query = 'INSERT INTO users (user_name) VALUES (%s)'
+        select_query = 'SELECT user_id FROM users WHERE user_name = %s'
+        insert_query = 'INSERT INTO users (user_name) VALUES (%s)'
         params = (user_name,)
-        self.cursor.execute(query, params)
-        self.connection.commit()
+        user_id = self.select_query(select_query, params)
+        if len(user_id) == 0:
+            self.update_query(insert_query, params)
+        else:
+            print('This user is already in base.')

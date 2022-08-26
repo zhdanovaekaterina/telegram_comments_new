@@ -1,6 +1,9 @@
-from modules.functions import add_user
+import config
+from classes.database import Database
 
-users_list = [(0,)]  # Here you should put a list of users to add. Every user should be a separate tuple.
+users_list = []  # Here you should put a list of users to add.
 
 if __name__ == '__main__':
-    add_user(users_list)
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    for user in users_list:
+        db.add_user(user)

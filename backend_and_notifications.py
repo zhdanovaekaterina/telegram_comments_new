@@ -2,21 +2,21 @@
 # This module does all dirty work for the program.
 import json
 import re
-import sqlite3 as sl
 import time as t
 from datetime import datetime
 
 import requests
 import telethon
 import schedule
+import telebot
 from bs4 import BeautifulSoup
-from telethon import client
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 
 import config
-from modules import functions_mysql as f
+from modules import functions as f
 from classes.database import Database
+
 
 tg_client = TelegramClient(config.username, config.api_id, config.api_hash)
 tg_client.start()
@@ -199,8 +199,21 @@ def get_active_post_list(db: Database):
     return full_data
 
 
-async def main():
+def send_comments():
+    # Create bot connection
+    bot = telebot.TeleBot(config.bot_token)
+    bot.delete_webhook()
 
+    # Main activity
+    flag, list_of_users, notification_message, list_of_buttons = f.prepare_comments()
+    if flag:
+        for user in list_of_users:
+            bot.send_message(user, notification_message, reply_markup=list_of_buttons)
+    else:
+        print('There are no new comments.')
+
+
+async def main():
     # Create database connection
     db = Database(config.host, config.port, config.user_name, config.user_password)
 
@@ -213,6 +226,11 @@ async def main():
             continue
         put_data_tobase(db, post[0][0], data, comments, post[1])
 
+    # Close database connection
+    del db
+
+    print('Comments collected.')
+
 
 def main_main():
     # First init
@@ -223,7 +241,8 @@ def main_main():
     def main_main_main():
         with tg_client:
             tg_client.loop.run_until_complete(main())
-        print('Done!')
+        send_comments()
+
     schedule.every(15).seconds.do(main_main_main)
 
     while True:

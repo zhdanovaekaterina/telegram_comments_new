@@ -10,7 +10,7 @@ import telebot
 from telebot import types
 
 import config
-from modules import functions_mysql as f, messages
+from modules import functions as f, messages
 from classes.database import Database
 
 bot = telebot.TeleBot(config.bot_token)
@@ -440,7 +440,6 @@ def main():
     # Base init
     db = Database(config.host, config.port, config.user_name, config.user_password)
     db.init_base()
-    db.add_user(218229736)
     del db
 
     # Bot working
