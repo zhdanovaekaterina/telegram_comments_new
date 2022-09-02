@@ -3,8 +3,7 @@
 # The goal is to make the work with comments tracking avaliable for marketer.
 
 import re
-import csv
-import os
+import asyncio
 
 import telebot
 from telebot import types
@@ -15,6 +14,11 @@ from classes.database import Database
 
 bot = telebot.TeleBot(config.bot_token)
 bot.delete_webhook()
+
+# Global variables declaration
+post_id = None
+client_id = None
+post_name = None
 
 
 # <-- Notifications section -->
@@ -113,16 +117,11 @@ def updates_command(message):
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^post_add_.*', call.data))
 def post_add_1(call):
     """Starts the procedure of adding new post to tracking.
-    Saves client_id to the NewPost object.
     Step 1: Ask to input post name.
     """
     bot.answer_callback_query(call.id)
+    global client_id
     client_id = call.data.split('_')[-1]
-
-    # Save client_id to the file
-    with open(config.post_info_temp_name, 'w') as csvfile:
-        csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
-        csv_writer.writerow(client_id)
 
     msg = bot.send_message(call.from_user.id, messages.ask_post_name)
     bot.register_next_step_handler(msg, process_post_link_input)
@@ -256,14 +255,9 @@ def track_again(call):
 def delete_post_1(call):
     """Deletes post from statistics. Asks for password for this action."""
     bot.answer_callback_query(call.id)
+    global post_id
     post_id = call.data.split('_')[-1]
     msg = bot.send_message(call.from_user.id, messages.ask_password)
-
-    # Save post_id to the temporary file
-    with open(config.post_id_temp_name, 'w') as csvfile:
-        csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
-        csv_writer.writerow(post_id)
-
     bot.register_next_step_handler(msg, delete_post)
 
 
@@ -321,10 +315,8 @@ def process_post_link_input(message):
         bot.send_message(message.chat.id, messages.stop_message)
         return
 
-    # Save post_name to the file
-    with open(config.post_info_temp_name, 'a') as csvfile:
-        csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
-        csv_writer.writerow([message.text])
+    global post_name
+    post_name = message.text
 
     msg = bot.send_message(message.chat.id, messages.ask_post_link)
     bot.register_next_step_handler(msg, finish_post_add)
@@ -343,22 +335,19 @@ def finish_post_add(message):
         return
 
     if re.fullmatch(r'^https://t\.me/.+/.+$', message.text):
+        global client_id, post_name
         channel_name = message.text.split('/')[-2]
         channel_post_id = message.text.split('/')[-1]
 
-        # Save channel_name and channel_post_id to the file
-        with open(config.post_info_temp_name, 'a') as csvfile:
-            csv_writer = csv.writer(csvfile, delimiter=',', lineterminator=',')
-            csv_writer.writerow([channel_name, channel_post_id])
-
         db = Database(config.host, config.port, config.user_name, config.user_password)
 
-        is_in_base = f.check_post(db, config.post_info_temp_name)
+        is_in_base = f.check_post(db, channel_name, channel_post_id)
         if not is_in_base[0]:
-            f.add_post(db, config.post_info_temp_name)
-            os.remove(config.post_info_temp_name)
+            f.add_post(db, client_id, post_name, channel_name, channel_post_id)
+            client_id, post_name = None, None
             bot.send_message(message.chat.id, messages.success_add_post_first_time)
         else:
+            client_id, post_name = None, None
             list_of_buttons = types.InlineKeyboardMarkup()
             yes_button = types.InlineKeyboardButton(text=messages.add_another_post,
                                                     callback_data='add_post')
@@ -384,7 +373,6 @@ def process_new_client(message):
         return
 
     client_name = message.text
-
     db = Database(config.host, config.port, config.user_name, config.user_password)
 
     # Check if client is already in base
@@ -425,11 +413,9 @@ def delete_post(message):
         return
 
     if message.text == config.password:
-        with open(config.post_id_temp_name, 'r') as csvfile:
-            csv_reader = csv.reader(csvfile, delimiter=',')
-            post_id = [row[0] for row in csv_reader]
-        f.delete_post(*post_id)
-        os.remove(config.post_id_temp_name)
+        global post_id
+        f.delete_post(post_id)
+        post_id = None
         bot.send_message(message.chat.id, messages.deleted_successfully)
     else:
         msg = bot.send_message(message.chat.id, messages.wrong_password)
@@ -443,7 +429,11 @@ def main():
     del db
 
     # Bot working
-    bot.polling()
+    while True:
+        try:
+            asyncio.run(bot.polling())
+        except ConnectionResetError:
+            asyncio.run(bot.polling())
 
 
 if __name__ == '__main__':

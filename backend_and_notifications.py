@@ -13,12 +13,12 @@ from bs4 import BeautifulSoup
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 
-import config
+import config as c
 from modules import functions as f
 from classes.database import Database
 
 
-tg_client = TelegramClient(config.username, config.api_id, config.api_hash)
+tg_client = TelegramClient(c.username, c.api_id, c.api_hash)
 tg_client.start()
 
 
@@ -29,7 +29,8 @@ async def dump_comments(channel, post_id):
         async for message in tg_client.iter_messages(channel, reply_to=post_id, reverse=True):
             if isinstance(message.sender, telethon.tl.types.User):
                 mess_date = message.date.timestamp()
-                message_text = message.text[:45] + '...' if len(message.text) > 45 else message.text
+                comm_length = c.comments_length - 5
+                message_text = message.text[:comm_length] + '...' if len(message.text) > comm_length else message.text
                 new_rec = [mess_date, message.sender.username, message.sender.first_name, message_text]
             else:
                 new_rec = None
@@ -201,7 +202,7 @@ def get_active_post_list(db: Database):
 
 def send_comments():
     # Create bot connection
-    bot = telebot.TeleBot(config.bot_token)
+    bot = telebot.TeleBot(c.bot_token)
     bot.delete_webhook()
 
     # Main activity
@@ -209,13 +210,11 @@ def send_comments():
     if flag:
         for user in list_of_users:
             bot.send_message(user, notification_message, reply_markup=list_of_buttons)
-    else:
-        print('There are no new comments.')
 
 
 async def main():
     # Create database connection
-    db = Database(config.host, config.port, config.user_name, config.user_password)
+    db = Database(c.host, c.port, c.user_name, c.user_password)
 
     # Get all active posts from the base
     full_data = get_active_post_list(db)
@@ -229,12 +228,10 @@ async def main():
     # Close database connection
     del db
 
-    print('Comments collected.')
-
 
 def main_main():
     # First init
-    db = Database(config.host, config.port, config.user_name, config.user_password)
+    db = Database(c.host, c.port, c.user_name, c.user_password)
     db.init_base()
     del db
 
@@ -243,7 +240,7 @@ def main_main():
             tg_client.loop.run_until_complete(main())
         send_comments()
 
-    schedule.every(15).seconds.do(main_main_main)
+    schedule.every(15).minutes.do(main_main_main)
 
     while True:
         schedule.run_pending()

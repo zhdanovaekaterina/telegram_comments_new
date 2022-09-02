@@ -1,5 +1,7 @@
 from mysql.connector import connect, Error
 
+import config as c
+
 
 class Database:
 
@@ -83,17 +85,16 @@ class Database:
                            """)
 
         # Create table 'comments'
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS comments
-                              (comment_id INT PRIMARY KEY AUTO_INCREMENT,
-                               post_id INT,
-                               comment_date INT,
-                               author_username VARCHAR(50),
-                               author VARCHAR(50),
-                               comment_text VARCHAR(50),
-                               is_new BOOL,
-                               FOREIGN KEY (post_id) REFERENCES posts (post_id) ON DELETE CASCADE
-                               );
-                           """)
+        self.cursor.execute(f'CREATE TABLE IF NOT EXISTS comments \
+                              (comment_id INT PRIMARY KEY AUTO_INCREMENT, \
+                               post_id INT, \
+                               comment_date INT, \
+                               author_username VARCHAR(50), \
+                               author VARCHAR(50), \
+                               comment_text VARCHAR({c.comments_length}), \
+                               is_new BOOL, \
+                               FOREIGN KEY (post_id) REFERENCES posts (post_id) ON DELETE CASCADE \
+                               );')
 
     def add_user(self, user_name):
         select_query = 'SELECT user_id FROM users WHERE user_name = %s'

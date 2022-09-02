@@ -151,31 +151,14 @@ def comment_info(db: Database, post_id: int, need_only_new=0):
     return comments_info_message, post_link
 
 
-def read_arguments(file_link: str):
-    """Reads all arguments in temporary file and returns a dict with args.
-    :param: file_link: ame of the file which has all arguments;
-    :return: post_arguments: a dictionary with all post info, saved in file earlier.
-    """
-    post_arguments = {}
-    with open(file_link, 'r') as csvfile:
-        csv_reader = csv.reader(csvfile, delimiter=',')
-        for row in csv_reader:
-            post_arguments['client_id'] = row[0]
-            post_arguments['post_name'] = row[1]
-            post_arguments['channel_name'] = row[2]
-            post_arguments['channel_post_id'] = row[3]
-    return post_arguments
-
-
-def check_post(db: Database, file_link: str):
+def check_post(db: Database, channel_name, channel_post_id):
     """Checks if new post is already in the base.
     :param: file_link: name of the file which has all arguments;
     :return: is_in_base: flag if client is already in base;
     :return: client_id: returns if client value is in base already, else False;
     """
     query = 'SELECT post_id FROM posts WHERE channel_name = %s AND channel_post_id = %s'
-    post_arguments = read_arguments(file_link)
-    params = (post_arguments['channel_name'], post_arguments['channel_post_id'])
+    params = (channel_name, channel_post_id)
     posts = db.select_query(query, params)
 
     is_in_base = False if len(posts) == 0 else True
@@ -185,17 +168,15 @@ def check_post(db: Database, file_link: str):
 
 
 # TODO: check add_client calls and remove is_added argument (result[0])
-def add_post(db: Database, file_link: str):
+def add_post(db: Database, client_id, post_name, channel_name, channel_post_id):
     """Adds new client to the base.
     :param file_link: name of the file which has all arguments;
     :return: is_added: flag if client added successfully;
     :return: post_id: id value of new client.
     """
-    args = read_arguments(file_link)
-
     query = 'INSERT INTO posts (client_id, channel_name, channel_post_id, post_name, is_archive)' \
             'VALUES (%s, %s, %s, %s, %s)'
-    params = (args['client_id'], args['channel_name'], args['channel_post_id'], args['post_name'], 0)
+    params = (client_id, channel_name, channel_post_id, post_name, 0)
     db.update_query(query, params)
 
 
@@ -251,13 +232,15 @@ def archive_client(client_id: int):
     del db
 
 
-def delete_post(db: Database, post_id: int):
+def delete_post(post_id: int):
     """Procedure, finally deletes the post from base.
     :param: post_id: unique id of post inside the base.
     """
+    db = Database(config.host, config.port, config.user_name, config.user_password)
     query = 'DELETE FROM posts WHERE post_id = %s'
     params = (post_id,)
     db.update_query(query, params)
+    del db
 
 
 def generate_buttons_list(callback_case: str, client_id=None):
