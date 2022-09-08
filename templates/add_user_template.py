@@ -1,7 +1,7 @@
 import config
 from classes.database import Database
 
-users_list = []  # Here you should put a list of users to add.
+users_list = [251165474]  # Here you should put a list of users to add.
 
 if __name__ == '__main__':
     db = Database(config.host, config.port, config.user_name, config.user_password)

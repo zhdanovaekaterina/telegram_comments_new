@@ -9,6 +9,7 @@ import requests
 import telethon
 import schedule
 import telebot
+import pandas as pd
 from bs4 import BeautifulSoup
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
@@ -131,57 +132,75 @@ async def collecting_data(post: list):
     return all_data, all_comments
 
 
-def put_data_tobase(db: Database, post_id, data, comments, is_first_collecting: bool):
-
-    # Put data into posts
-    if is_first_collecting:
-        query = 'UPDATE posts SET publication_date = %s, subscribers_count = %s WHERE post_id = %s'
-        params = (data['publication_date'], data['subscribers_count'], post_id)
-        db.update_query(query, params)
-
-    # Put data into stats
-    date_now = datetime.now().timestamp()
-    query = 'INSERT INTO stats (post_id, date, views, forwards) VALUES (%s, %s, %s, %s)'
-    params = (post_id, date_now, data['views'], data['forwards'])
+def put_data_to_posts(db: Database, post_id, data):
+    query = 'UPDATE posts SET publication_date = %s, subscribers_count = %s WHERE post_id = %s'
+    params = (data['publication_date'], data['subscribers_count'], post_id)
     db.update_query(query, params)
 
-    if comments is not None:
-        comments_to_load = []
-        if not is_first_collecting:
 
-            # Load all previous comments from the base
-            query = 'SELECT comment_date FROM comments WHERE post_id = %s'
-            params = (post_id,)
-            old_comments = db.select_query(query, params)
+def put_data_to_stats(db: Database, post_id, data):
+    # Take last added data from base
+    query = 'SELECT views, forwards FROM stats WHERE post_id = %s'
+    params = (post_id,)
+    old_data = db.select_query(query, params)
 
-            # Compare old and new comment sets
-            old_comments_1 = set()
-            [old_comments_1.add(comm[0]) for comm in old_comments]
+    # Put data into stats
+    if old_data[-1][0] == data['views'] and old_data[-1][1] == data['forwards']:
+        pass
+    else:
+        date_now = datetime.now().timestamp()
+        query = 'INSERT INTO stats (post_id, date, views, forwards) VALUES (%s, %s, %s, %s)'
+        params = (post_id, date_now, data['views'], data['forwards'])
+        db.update_query(query, params)
 
-            new_comments = set()
-            [new_comments.add(comm[0]) for comm in comments]
-            diff_set = new_comments - old_comments_1
 
-            # Update list of comments to load
-            for comm in comments:
-                if comm[0] in diff_set:
-                    comm.insert(0, post_id)
-                    comm.append('1')
-                    comm = tuple(comm)
-                    comments_to_load.append(comm)
+def put_data_to_comments(db: Database, post_id, comments, is_first_collecting: bool):
+    comments_to_load = []
+    if not is_first_collecting:
 
-        else:
-            comments_to_load = []
-            for comm in comments:
+        # Load all previous comments from the base
+        query = 'SELECT comment_date FROM comments WHERE post_id = %s'
+        params = (post_id,)
+        old_comments = db.select_query(query, params)
+
+        # Compare old and new comment sets
+        old_comments_1 = set()
+        [old_comments_1.add(comm[0]) for comm in old_comments]
+
+        new_comments = set()
+        [new_comments.add(comm[0]) for comm in comments]
+        diff_set = new_comments - old_comments_1
+
+        # Update list of comments to load
+        for comm in comments:
+            if comm[0] in diff_set:
                 comm.insert(0, post_id)
                 comm.append('1')
                 comm = tuple(comm)
                 comments_to_load.append(comm)
 
-        # Put comments into comments
-        query = 'INSERT INTO comments (post_id, comment_date, author_username, author, comment_text, is_new) ' \
-                'VALUES (%s, %s, %s, %s, %s, %s)'
-        db.update_many_query(query, comments_to_load)
+    else:
+        comments_to_load = []
+        for comm in comments:
+            comm.insert(0, post_id)
+            comm.append('1')
+            comm = tuple(comm)
+            comments_to_load.append(comm)
+
+    # Put comments into comments
+    query = 'INSERT INTO comments (post_id, comment_date, author_username, author, comment_text, is_new) ' \
+            'VALUES (%s, %s, %s, %s, %s, %s)'
+    db.update_many_query(query, comments_to_load)
+
+
+def put_data_tobase(db: Database, post_id, data, comments, is_first_collecting: bool):
+    if is_first_collecting:
+        put_data_to_posts(db, post_id, data)
+
+    put_data_to_stats(db, post_id, data)
+
+    if comments is not None:
+        put_data_to_comments(db, post_id, comments, is_first_collecting)
 
 
 def get_active_post_list(db: Database):
