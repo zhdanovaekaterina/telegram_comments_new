@@ -1,4 +1,4 @@
-config.py
+src/config.py
 .idea
 venv
 test_post_object.py
@@ -7,5 +7,5 @@ test_functions.py
 *.csv
 *.session
 *.json
-debbuging.py
+debbuging.*
 *.dockerfile

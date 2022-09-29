@@ -3,14 +3,19 @@
 # The goal is to make the work with comments tracking avaliable for marketer.
 
 import re
+import os
 import asyncio
+import time as t
 
 import telebot
 from telebot import types
+from requests import exceptions as e
+from apscheduler.schedulers.background import BackgroundScheduler
 
-import config
+import src.config as config
 from modules import functions as f, messages
 from classes.database import Database
+from decorators import connectionerror
 
 bot = telebot.TeleBot(config.bot_token)
 bot.delete_webhook()
@@ -37,7 +42,11 @@ def check_user_id(message):
 @bot.message_handler(commands=['start'])
 def start_command(message):
     """Sends greeting message and the list of commands available."""
-    bot.send_message(message.chat.id, messages.start_message)
+    buttons = types.InlineKeyboardMarkup()
+    button = types.InlineKeyboardButton(text=messages.documentation,
+                                        url=config.documentation_url)
+    buttons.add(button)
+    bot.send_message(message.chat.id, messages.start_message, reply_markup=buttons)
 
 
 @bot.message_handler(commands=['add'])
@@ -81,7 +90,11 @@ def clients_command(message):
 @bot.message_handler(commands=['help'])
 def help_command(message):
     """Sends the list of available commands and their descriptions."""
-    bot.send_message(message.chat.id, messages.help_message)
+    buttons = types.InlineKeyboardMarkup()
+    button = types.InlineKeyboardButton(text=messages.documentation,
+                                        url=config.documentation_url)
+    buttons.add(button)
+    bot.send_message(message.chat.id, messages.help_message, reply_markup=buttons)
 
 
 @bot.message_handler(commands=['archive'])
@@ -172,7 +185,7 @@ def select_active_post(call):
     post_info = f.get_post_details(post_id)
 
     if post_info[1] is not None:
-        list_of_buttons = types.InlineKeyboardMarkup()
+        list_of_buttons = types.InlineKeyboardMarkup(row_width=2)
         watch_comments_button = types.InlineKeyboardButton(text=messages.watch_comments,
                                                            callback_data=f'give_comments_list_0_{post_id}')
         go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
@@ -225,6 +238,23 @@ def select_archive_client(call):
     client_id = call.data.split('_')[-1]
     list_of_buttons = f.generate_buttons_list('select_archive_post', client_id)
     bot.send_message(call.from_user.id, messages.client_posts_archive_message, reply_markup=list_of_buttons)
+
+
+@bot.callback_query_handler(func=lambda call: re.fullmatch(r'^return_client_.*', call.data))
+def return_client_to_active(call):
+    """Returns client into active state. All posts of the client in this case are still archived."""
+    bot.answer_callback_query(call.id)
+    client_id = call.data.split('_')[-1]
+
+    f.return_client(client_id)
+
+    list_of_buttons = types.InlineKeyboardMarkup()
+    add_post_button = types.InlineKeyboardButton(text=messages.add_post,
+                                                 callback_data=f'post_add_{client_id}')
+    nothing_button = types.InlineKeyboardButton(text=messages.nothing,
+                                                callback_data='exit')
+    list_of_buttons.add(add_post_button, nothing_button)
+    bot.send_message(call.from_user.id, messages.success_return_client, reply_markup=list_of_buttons)
 
 
 @bot.callback_query_handler(func=lambda call: re.fullmatch(r'^select_archive_post_.*', call.data))
@@ -390,9 +420,21 @@ def process_new_client(message):
         list_of_buttons.add(add_post_button, nothing_button)
         bot.send_message(message.chat.id, messages.success_add_client, reply_markup=list_of_buttons)
 
+    # Checks if client is archived and proposes to return it
+    elif in_base[2] == 1:
+        list_of_buttons = types.InlineKeyboardMarkup(row_width=2)
+        return_post_button = types.InlineKeyboardButton(text=messages.track_again,
+                                                        callback_data=f'return_client_{in_base[1]}')
+        add_another_client_button = types.InlineKeyboardButton(text=messages.add_client_button,
+                                                               callback_data='add_new_client')
+        nothing_button = types.InlineKeyboardButton(text=messages.nothing,
+                                                    callback_data='exit')
+        list_of_buttons.add(return_post_button, add_another_client_button, nothing_button)
+        bot.send_message(message.chat.id, messages.client_archived, reply_markup=list_of_buttons)
+
     # Return client_id and propose to add a post for this client as well
     else:
-        list_of_buttons = types.InlineKeyboardMarkup()
+        list_of_buttons = types.InlineKeyboardMarkup(row_width=2)
         add_post_button = types.InlineKeyboardButton(text=messages.add_post,
                                                      callback_data=f'post_add_{in_base[1]}')
         add_another_client_button = types.InlineKeyboardButton(text=messages.add_client_button,
@@ -422,19 +464,36 @@ def delete_post(message):
         bot.register_next_step_handler(msg, delete_post)
 
 
+def daemon(foo):
+    job_defaults = {
+        'max_instances': 3
+    }
+
+    scheduler = BackgroundScheduler(job_defaults=job_defaults)
+    scheduler.add_job(foo, 'interval', seconds=3)
+    scheduler.start()
+    print('Press Ctrl+{0} to exit'.format('Break' if os.name == 'nt' else 'C'))
+
+    try:
+        # This is here to simulate application activity (which keeps the main thread alive).
+        while True:
+            t.sleep(2)
+    except (KeyboardInterrupt, SystemExit):
+        # Not strictly necessary if daemonic mode is enabled but should be done if possible
+        scheduler.shutdown()
+
+
+@connectionerror
 def main():
+    print('Start bot working!')
+    bot.polling()
+
+
+if __name__ == '__main__':
     # Base init
     db = Database(config.host, config.port, config.user_name, config.user_password)
     db.init_base()
     del db
 
     # Bot working
-    while True:
-        try:
-            asyncio.run(bot.polling())
-        except ConnectionResetError:
-            asyncio.run(bot.polling())
-
-
-if __name__ == '__main__':
     main()

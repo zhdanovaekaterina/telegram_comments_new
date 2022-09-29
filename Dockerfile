@@ -1,10 +1,12 @@
-FROM python:3.9
+FROM python:3.9-slim
 
-WORKDIR /usr/src/app
+WORKDIR /code
 
-COPY requirements.txt ./
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY classes/ .
+COPY modules/ .
+COPY src/ .
 
 CMD [ "python", "./bot_main.py" ]

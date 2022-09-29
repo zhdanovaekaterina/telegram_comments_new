@@ -1,6 +1,6 @@
 from mysql.connector import connect, Error
 
-import config as c
+from src import config as c
 
 
 class Database:
@@ -12,6 +12,7 @@ class Database:
                                       user=user_name,
                                       password=user_password)
             self.cursor = self.connection.cursor()
+            self.cursor.execute('CREATE DATABASE IF NOT EXISTS bot_base')
             self.cursor.execute('USE bot_base')
         except Error as e:
             print(e)
@@ -50,7 +51,7 @@ class Database:
         # Create table 'users'
         self.cursor.execute("""CREATE TABLE IF NOT EXISTS users
                               (user_id INT PRIMARY KEY AUTO_INCREMENT,
-                               user_name INT)
+                               user_name BIGINT)
                            """)
 
         # Create table 'clients'

@@ -1,10 +1,9 @@
 import re
-import csv
 from datetime import datetime
 
 from telebot import types
 
-import config
+from src import config
 from classes.database import Database
 
 
@@ -14,14 +13,15 @@ def check_client(db: Database, new_client: str):
     :return: is_in_base: flag if client is already in base;
     :return: client_id: id value if client is in base already, else False;
     """
-    query = """SELECT client_id FROM clients WHERE client_name IN(%s)"""
+    query = """SELECT client_id, is_archive FROM clients WHERE client_name IN(%s)"""
     params = (str(new_client.capitalize()),)
     result = db.select_query(query, params)
 
     is_in_base = False if len(result) == 0 else True
     client_id = result[0][0] if is_in_base else False
+    is_archive = result[0][1] if is_in_base else False
 
-    return is_in_base, client_id
+    return is_in_base, client_id, is_archive
 
 
 # TODO: check add_client calls and remove is_added argument (result[0])
@@ -274,11 +274,12 @@ def get_post_details(post_id):
 
     if post_inf is not None:
         publication_date = datetime.utcfromtimestamp(post_inf['publication_date']).strftime(config.date_format)
+        post_inf["comments_all"] = 0 if post_inf["comments_all"] is None else post_inf["comments_all"]
 
         post_info_message = f'Название поста: {post_inf["post_name"]}\n' \
                             f'Канал: {post_inf["channel_name"]}\n' \
                             f'Дата публикации: {publication_date}\n' \
-                            f'Подписчиков на момент публикации: {post_inf["subscribers_count"]}\n' \
+                            f'Подписчиков на момент добавления: {post_inf["subscribers_count"]}\n' \
                             f'Просмотров: {post_inf["views"]}\n' \
                             f'Репостов: {post_inf["forwards"]}\n' \
                             f'Комментариев всего: {post_inf["comments_all"]}\n'
@@ -375,6 +376,14 @@ def delete_all_users():
     db = Database(config.host, config.port, config.user_name, config.user_password)
     query = 'DELETE FROM users'
     db.update_query(query)
+    del db
+
+
+def return_client(client_id):
+    db = Database(config.host, config.port, config.user_name, config.user_password)
+    query = 'UPDATE clients SET is_archive = 0 WHERE client_id = %s'
+    values = (client_id,)
+    db.update_query(query, values)
     del db
 
 

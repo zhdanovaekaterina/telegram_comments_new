@@ -1,5 +1,6 @@
 # This Python file uses the following encoding: ascii
 # This module does all dirty work for the program.
+import asyncio
 import json
 import re
 import time as t
@@ -14,13 +15,15 @@ from bs4 import BeautifulSoup
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
 
-import config as c
+import src.config as c
 from modules import functions as f
 from classes.database import Database
+from bot_main import main as bot_func
+from decorators import connectionerror
 
 
 tg_client = TelegramClient(c.username, c.api_id, c.api_hash)
-tg_client.start()
+# tg_client.start()
 
 
 async def dump_comments(channel, post_id):
@@ -145,8 +148,9 @@ def put_data_to_stats(db: Database, post_id, data):
     old_data = db.select_query(query, params)
 
     # Put data into stats
-    if old_data[-1][0] == data['views'] and old_data[-1][1] == data['forwards']:
-        pass
+    if len(old_data) > 0:
+        if old_data[-1][0] == data['views'] and old_data[-1][1] == data['forwards']:
+            pass
     else:
         date_now = datetime.now().timestamp()
         query = 'INSERT INTO stats (post_id, date, views, forwards) VALUES (%s, %s, %s, %s)'
@@ -231,7 +235,30 @@ def send_comments():
             bot.send_message(user, notification_message, reply_markup=list_of_buttons)
 
 
+def with_tg_client(main):
+
+    def another_main():
+        def main_main_main():
+            # First base init
+            db = Database(c.host, c.port, c.user_name, c.user_password)
+            db.init_base()
+            del db
+
+            with tg_client:
+                tg_client.loop.run_until_complete(main())
+            send_comments()
+            print(f'Done at {datetime.now().strftime("%H:%M")}')
+
+        schedule.every(15).minutes.do(main_main_main)
+        while True:
+            schedule.run_pending()
+
+    return another_main
+
+
+@with_tg_client
 async def main():
+    print('Start backend working (internal message)')
     # Create database connection
     db = Database(c.host, c.port, c.user_name, c.user_password)
 
@@ -248,23 +275,6 @@ async def main():
     del db
 
 
-def main_main():
-    # First init
-    db = Database(c.host, c.port, c.user_name, c.user_password)
-    db.init_base()
-    del db
-
-    def main_main_main():
-        with tg_client:
-            tg_client.loop.run_until_complete(main())
-        send_comments()
-
-    schedule.every(15).minutes.do(main_main_main)
-
-    while True:
-        schedule.run_pending()
-        t.sleep(5)
-
-
 if __name__ == '__main__':
-    main_main()
+    print('Start backend working!')
+    main()

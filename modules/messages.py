@@ -1,11 +1,8 @@
 # <-- Message text section -->
 
 # Help message with the list of available commands
-help_message = '/help - помощь\n' \
-               '/add - добавить пост\n' \
-               '/clients - добавить клиента\n' \
-               '/updates - посмотреть новые комментарии\n' \
-               '/archive - архив\n' \
+help_message = 'Список команд можно посмотреть в меню.\n' \
+               'Документацию по работе с ботом можно найти, нажав на кнопку ниже.\n' \
                'STOP - сбросить текущую команду'
 
 # First message after bot start
@@ -91,8 +88,14 @@ success_archive_client = 'Клиент успешно перемещен в ар
 # Successfully added client
 success_add_client = 'Клиент успешно добавлен. Хотите добавить пост для этого клиента?'
 
+# Successfully returned client
+success_return_client = 'Клиент возвращен в список активных клиентов. Хотите добавить пост для этого клиента?'
+
 # Client already exists
 client_already_exists = 'В базе уже есть такой клиент! Хотите добавить для него пост или добавить нового клиента?'
+
+# Client archived
+client_archived = 'Этот клиент находится в архиве. Вы можете снова сделать его активным или добавить другого клиента.'
 
 # Post don't have comments yet
 no_comments_yet = 'У этого поста еще нет комментариев. Попробуйте проверить позже.'
@@ -125,6 +128,7 @@ help_button = 'Помощь'
 add_button = 'Добавить пост'
 client_button = 'Добавить клиента'
 archive_button = 'Архив'
+documentation = 'Документация'
 
 # Add new client button
 add_client_button = 'Добавить клиента'
