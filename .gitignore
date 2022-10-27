@@ -1,11 +1,9 @@
 src/config.py
 .idea
 venv
-test_post_object.py
 *.db
-test_functions.py
 *.csv
 *.session
 *.json
-debbuging.*
+debugging
 *.dockerfile

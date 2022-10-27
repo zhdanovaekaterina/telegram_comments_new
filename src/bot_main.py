@@ -3,20 +3,17 @@
 # The goal is to make the work with comments tracking avaliable for marketer.
 
 import re
-import os
-import asyncio
-import time as t
+import logging
 
 import telebot
 from telebot import types
-from requests import exceptions as e
-from apscheduler.schedulers.background import BackgroundScheduler
 
 import src.config as config
 from modules import functions as f, messages
-from classes.database import Database
-from decorators import connectionerror
+from classes.buttons import Buttons
+from src.decorators import connectionerror
 
+# Configure bot
 bot = telebot.TeleBot(config.bot_token)
 bot.delete_webhook()
 
@@ -24,6 +21,15 @@ bot.delete_webhook()
 post_id = None
 client_id = None
 post_name = None
+
+# Logger settings
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logging.basicConfig(
+                    force=True,
+                    format="%(asctime)s %(levelname)s %(message)s",
+                    datefmt='%Y-%m-%d %H:%M:%S',
+                    )
 
 
 # <-- Notifications section -->
@@ -41,12 +47,7 @@ def check_user_id(message):
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
-    """Sends greeting message and the list of commands available."""
-    buttons = types.InlineKeyboardMarkup()
-    button = types.InlineKeyboardButton(text=messages.documentation,
-                                        url=config.documentation_url)
-    buttons.add(button)
-    bot.send_message(message.chat.id, messages.start_message, reply_markup=buttons)
+    bot.send_message(message.chat.id, messages.start_message, reply_markup=Buttons().start_command_button)
 
 
 @bot.message_handler(commands=['add'])
@@ -110,9 +111,9 @@ def archive_command(message):
 @bot.message_handler(commands=['updates'])
 def updates_command(message):
     """Sends the list of new comments."""
-    flag, list_of_users, notification_message, list_of_buttons = f.prepare_comments()
-    if flag:
-        bot.send_message(message.chat.id, notification_message, reply_markup=list_of_buttons)
+    result = f.prepare_comments()
+    if result.flag:
+        bot.send_message(message.chat.id, result.notification_message, reply_markup=result.list_of_buttons)
     else:
         bot.send_message(message.chat.id, messages.no_updates)
 
@@ -204,12 +205,11 @@ def give_comments_list(call):
     """Sends the list of comments under the selected post."""
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
-    need_only_new = int(call.data.split('_')[-2])
+    need_only_new = True if int(call.data.split('_')[-2]) == 1 else False
 
-    db = Database(config.host, config.port, config.user_name, config.user_password)
-    comments_info = f.comment_info(db, post_id, need_only_new)
+    comments_info = f.comment_info(post_id, need_only_new)
     if need_only_new == 1:
-        f.delete_is_new_flags(db, post_id)
+        f.delete_is_new_flags(post_id)
     if comments_info is not None:
         list_of_buttons = types.InlineKeyboardMarkup()
         go_to_post_button = types.InlineKeyboardButton(text=messages.go_to_post,
@@ -218,7 +218,6 @@ def give_comments_list(call):
         bot.send_message(call.from_user.id, comments_info[0], reply_markup=list_of_buttons)
     else:
         bot.send_message(call.from_user.id, messages.no_comments_yet)
-    del db
 
 
 @bot.callback_query_handler(func=lambda call: call.data == 'add_new_client')
@@ -277,7 +276,7 @@ def track_again(call):
     """Returns archived post to tracking."""
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
-    f.track_status(post_id, False)
+    f.track_status(post_id)
     bot.send_message(call.from_user.id, messages.success_add_post)
 
 
@@ -321,7 +320,7 @@ def archive_post(call):
     """Starts the move-to-archive procedure."""
     bot.answer_callback_query(call.id)
     post_id = call.data.split('_')[-1]
-    f.track_status(post_id, True)
+    f.track_status(post_id, to_archive=True)
     bot.send_message(call.from_user.id, messages.success_archive_post)
 
 
@@ -369,11 +368,9 @@ def finish_post_add(message):
         channel_name = message.text.split('/')[-2]
         channel_post_id = message.text.split('/')[-1]
 
-        db = Database(config.host, config.port, config.user_name, config.user_password)
-
-        is_in_base = f.check_post(db, channel_name, channel_post_id)
+        is_in_base = f.check_post(channel_name, channel_post_id)
         if not is_in_base[0]:
-            f.add_post(db, client_id, post_name, channel_name, channel_post_id)
+            f.add_post(client_id, post_name, channel_name, channel_post_id)
             client_id, post_name = None, None
             bot.send_message(message.chat.id, messages.success_add_post_first_time)
         else:
@@ -385,8 +382,6 @@ def finish_post_add(message):
                                                    callback_data='exit')
             list_of_buttons.add(yes_button, no_button)
             bot.send_message(message.chat.id, messages.post_already_exists, reply_markup=list_of_buttons)
-
-        del db
 
     else:
         msg = bot.send_message(message.chat.id, messages.ask_post_link_second_time)
@@ -403,14 +398,13 @@ def process_new_client(message):
         return
 
     client_name = message.text
-    db = Database(config.host, config.port, config.user_name, config.user_password)
 
     # Check if client is already in base
-    in_base = f.check_client(db, client_name)
+    in_base = f.check_client(client_name)
 
     # Add new client and propose to add a post for this client
     if not in_base[0]:
-        client_added = f.add_client(db, client_name)
+        client_added = f.add_client(client_name)
 
         list_of_buttons = types.InlineKeyboardMarkup()
         add_post_button = types.InlineKeyboardButton(text=messages.add_post,
@@ -444,8 +438,6 @@ def process_new_client(message):
         list_of_buttons.add(add_post_button, add_another_client_button, nothing_button)
         bot.send_message(message.chat.id, messages.client_already_exists, reply_markup=list_of_buttons)
 
-    del db
-
 
 @bot.message_handler(content_types=['text'])
 def delete_post(message):
@@ -464,36 +456,11 @@ def delete_post(message):
         bot.register_next_step_handler(msg, delete_post)
 
 
-def daemon(foo):
-    job_defaults = {
-        'max_instances': 3
-    }
-
-    scheduler = BackgroundScheduler(job_defaults=job_defaults)
-    scheduler.add_job(foo, 'interval', seconds=3)
-    scheduler.start()
-    print('Press Ctrl+{0} to exit'.format('Break' if os.name == 'nt' else 'C'))
-
-    try:
-        # This is here to simulate application activity (which keeps the main thread alive).
-        while True:
-            t.sleep(2)
-    except (KeyboardInterrupt, SystemExit):
-        # Not strictly necessary if daemonic mode is enabled but should be done if possible
-        scheduler.shutdown()
-
-
 @connectionerror
 def main():
-    print('Start bot working!')
-    bot.polling()
+    logger.debug('Start bot working')
+    bot.polling(none_stop=True)
 
 
 if __name__ == '__main__':
-    # Base init
-    db = Database(config.host, config.port, config.user_name, config.user_password)
-    db.init_base()
-    del db
-
-    # Bot working
     main()

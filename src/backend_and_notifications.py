@@ -1,16 +1,13 @@
 # This Python file uses the following encoding: ascii
 # This module does all dirty work for the program.
-import asyncio
 import json
 import re
-import time as t
 from datetime import datetime
 
 import requests
 import telethon
 import schedule
 import telebot
-import pandas as pd
 from bs4 import BeautifulSoup
 from telethon.sync import TelegramClient
 from telethon.tl.functions.messages import GetHistoryRequest
@@ -18,8 +15,7 @@ from telethon.tl.functions.messages import GetHistoryRequest
 import src.config as c
 from modules import functions as f
 from classes.database import Database
-from bot_main import main as bot_func
-from decorators import connectionerror
+# from bot_main import main as bot_func
 
 
 tg_client = TelegramClient(c.username, c.api_id, c.api_hash)
@@ -127,7 +123,7 @@ async def collecting_data(post: list):
     # Dump post info
     all_data = await dump_post_info(channel, channel_post_id)
     if not all_data:
-        f.track_status(post[0], True)
+        f.track_status(post[0], to_archive=True)
 
     if post[1]:
         all_data['subscribers_count'] = dump_subscribers_count(post[0][1])
@@ -229,10 +225,22 @@ def send_comments():
     bot.delete_webhook()
 
     # Main activity
-    flag, list_of_users, notification_message, list_of_buttons = f.prepare_comments()
-    if flag:
-        for user in list_of_users:
-            bot.send_message(user, notification_message, reply_markup=list_of_buttons)
+    result = f.prepare_comments()
+    if result.flag:
+        for user in result.list_of_users:
+            bot.send_message(user, result.notification_message, reply_markup=result.list_of_buttons)
+
+
+def main_main_main():
+    # First base init
+    db = Database(c.host, c.port, c.user_name, c.user_password)
+    db.init_base()
+    del db
+
+    with tg_client:
+        tg_client.loop.run_until_complete(main())
+    send_comments()
+    print(f'Done at {datetime.now().strftime("%H:%M")}')
 
 
 def with_tg_client(main):
@@ -249,7 +257,8 @@ def with_tg_client(main):
             send_comments()
             print(f'Done at {datetime.now().strftime("%H:%M")}')
 
-        schedule.every(15).minutes.do(main_main_main)
+        # schedule.every(15).minutes.do(main_main_main)
+        schedule.every(5).seconds.do(main_main_main)
         while True:
             schedule.run_pending()
 
