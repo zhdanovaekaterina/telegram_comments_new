@@ -131,17 +131,21 @@ async def collecting_data(post: list):
     return all_data, all_comments
 
 
-def put_data_to_posts(db: Database, post_id, data):
+def put_data_to_posts(post_id, data):
     query = 'UPDATE posts SET publication_date = %s, subscribers_count = %s WHERE post_id = %s'
     params = (data['publication_date'], data['subscribers_count'], post_id)
-    db.update_query(query, params)
+
+    with Database() as db:
+        db.update_query(query, params)
 
 
-def put_data_to_stats(db: Database, post_id, data):
+def put_data_to_stats(post_id, data):
     # Take last added data from base
     query = 'SELECT views, forwards FROM stats WHERE post_id = %s'
     params = (post_id,)
-    old_data = db.select_query(query, params)
+
+    with Database() as db:
+        old_data = db.select_query(query, params)
 
     # Put data into stats
     if len(old_data) > 0:
@@ -151,17 +155,21 @@ def put_data_to_stats(db: Database, post_id, data):
         date_now = datetime.now().timestamp()
         query = 'INSERT INTO stats (post_id, date, views, forwards) VALUES (%s, %s, %s, %s)'
         params = (post_id, date_now, data['views'], data['forwards'])
-        db.update_query(query, params)
+
+        with Database() as db:
+            db.update_query(query, params)
 
 
-def put_data_to_comments(db: Database, post_id, comments, is_first_collecting: bool):
+def put_data_to_comments(post_id, comments, is_first_collecting: bool):
     comments_to_load = []
     if not is_first_collecting:
 
         # Load all previous comments from the base
         query = 'SELECT comment_date FROM comments WHERE post_id = %s'
         params = (post_id,)
-        old_comments = db.select_query(query, params)
+
+        with Database() as db:
+            old_comments = db.select_query(query, params)
 
         # Compare old and new comment sets
         old_comments_1 = set()
@@ -190,23 +198,26 @@ def put_data_to_comments(db: Database, post_id, comments, is_first_collecting: b
     # Put comments into comments
     query = 'INSERT INTO comments (post_id, comment_date, author_username, author, comment_text, is_new) ' \
             'VALUES (%s, %s, %s, %s, %s, %s)'
-    db.update_many_query(query, comments_to_load)
+
+    with Database() as db:
+        db.update_many_query(query, comments_to_load)
 
 
-def put_data_tobase(db: Database, post_id, data, comments, is_first_collecting: bool):
+def put_data_tobase(post_id, data, comments, is_first_collecting: bool):
     if is_first_collecting:
-        put_data_to_posts(db, post_id, data)
+        put_data_to_posts(post_id, data)
 
-    put_data_to_stats(db, post_id, data)
+    put_data_to_stats(post_id, data)
 
     if comments is not None:
-        put_data_to_comments(db, post_id, comments, is_first_collecting)
+        put_data_to_comments(post_id, comments, is_first_collecting)
 
 
-def get_active_post_list(db: Database):
+def get_active_post_list():
     # Get post attributes from the base
     query = 'SELECT post_id, channel_name, channel_post_id, publication_date FROM posts WHERE is_archive = 0'
-    post_info = db.select_query(query)
+    with Database() as db:
+        post_info = db.select_query(query)
 
     full_data = []
     for post in post_info:
@@ -232,10 +243,6 @@ def send_comments():
 
 
 def main_main_main():
-    # First base init
-    db = Database(c.host, c.port, c.user_name, c.user_password)
-    db.init_base()
-    del db
 
     with tg_client:
         tg_client.loop.run_until_complete(main())
@@ -247,10 +254,6 @@ def with_tg_client(main):
 
     def another_main():
         def main_main_main():
-            # First base init
-            db = Database(c.host, c.port, c.user_name, c.user_password)
-            db.init_base()
-            del db
 
             with tg_client:
                 tg_client.loop.run_until_complete(main())
@@ -258,7 +261,7 @@ def with_tg_client(main):
             print(f'Done at {datetime.now().strftime("%H:%M")}')
 
         # schedule.every(15).minutes.do(main_main_main)
-        schedule.every(5).seconds.do(main_main_main)
+        schedule.every(15).minutes.do(main_main_main)
         while True:
             schedule.run_pending()
 
@@ -268,20 +271,15 @@ def with_tg_client(main):
 @with_tg_client
 async def main():
     print('Start backend working (internal message)')
-    # Create database connection
-    db = Database(c.host, c.port, c.user_name, c.user_password)
 
     # Get all active posts from the base
-    full_data = get_active_post_list(db)
+    full_data = get_active_post_list()
 
     for post in full_data:
         data, comments = await collecting_data(post)
         if not data:
             continue
-        put_data_tobase(db, post[0][0], data, comments, post[1])
-
-    # Close database connection
-    del db
+        put_data_tobase(post[0][0], data, comments, post[1])
 
 
 if __name__ == '__main__':

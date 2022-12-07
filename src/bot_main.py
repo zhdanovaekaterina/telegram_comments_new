@@ -37,6 +37,7 @@ logging.basicConfig(
 
 @bot.message_handler(func=lambda message: message.chat.id not in f.list_of_user_ids())
 def check_user_id(message):
+    print(message.chat.id)
     bot.send_message(message.chat.id, messages.no_permission)
     your_user_id = f.your_user_id(message.chat.id)
     bot.send_message(message.chat.id, your_user_id)
@@ -47,6 +48,7 @@ def check_user_id(message):
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
+    print(message.chat.id)
     bot.send_message(message.chat.id, messages.start_message, reply_markup=Buttons().start_command_button)
 
 
